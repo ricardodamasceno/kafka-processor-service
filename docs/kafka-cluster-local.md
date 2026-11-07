@@ -1,97 +1,97 @@
-# Cluster Kafka local
+# Local Kafka cluster
 
-Configuração em `docker/` para subir um cluster Kafka de desenvolvimento e criar os tópicos do laboratório.
+Setup in `docker/` that starts a local development Kafka cluster and creates the project topics. The same Compose file also starts PostgreSQL (see [database.md](database.md)).
 
-## Arquivos
+## Files
 
-| Arquivo | Função |
+| File | Purpose |
 |---|---|
-| `docker/docker-compose.yml` | Define brokers, Schema Registry, Kafka UI e o job de criação de tópicos |
-| `docker/create-topics.sh` | Script idempotente que cria os tópicos (`--if-not-exists`) |
+| `docker/docker-compose.yml` | Defines brokers, Schema Registry, Kafka UI, the topic creation job and PostgreSQL |
+| `docker/create-topics.sh` | Idempotent script that creates the topics (`--if-not-exists`) |
 
-## Serviços
+## Services
 
-| Serviço | Imagem | Porta no host | Observação |
+| Service | Image | Host port | Notes |
 |---|---|---|---|
-| `kafka-1` | `apache/kafka:3.9.0` | 19092 | Broker + controller (KRaft), com healthcheck |
+| `kafka-1` | `apache/kafka:3.9.0` | 19092 | Broker + controller (KRaft), with healthcheck |
 | `kafka-2` | `apache/kafka:3.9.0` | 29092 | Broker + controller (KRaft) |
 | `kafka-3` | `apache/kafka:3.9.0` | 39092 | Broker + controller (KRaft) |
-| `schema-registry` | `confluentinc/cp-schema-registry:7.7.1` | 8082 | Espera `kafka-1` ficar saudável |
-| `kafka-ui` | `provectuslabs/kafka-ui:latest` | 8081 | Interface web |
-| `kafka-init` | `apache/kafka:3.9.0` | n/a | Roda `create-topics.sh` e termina (exit 0) |
+| `schema-registry` | `confluentinc/cp-schema-registry:7.7.1` | 8082 | Waits for `kafka-1` to be healthy |
+| `kafka-ui` | `provectuslabs/kafka-ui:latest` | 8081 | Web interface |
+| `kafka-init` | `apache/kafka:3.9.0` | n/a | Runs `create-topics.sh` and exits (code 0) |
+| `postgres` | `postgres:17` | 5432 | See [database.md](database.md) |
 
-O projeto do Compose se chama `events-processor`.
+The Compose project is named `events-processor`. Port 8080 is intentionally left free for the application service.
 
-## Como usar
+## Usage
 
-A partir da raiz do projeto:
+From the project root:
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-Parar e remover os containers (os dados são perdidos, pois não há volumes):
+Stop and remove the containers (Kafka data is lost, since there are no volumes for it):
 
 ```bash
 docker compose -f docker/docker-compose.yml down
 ```
 
-Ver o estado, incluindo o `kafka-init` que já terminou:
+Check the status, including `kafka-init`, which has already finished:
 
 ```bash
 docker compose -f docker/docker-compose.yml ps -a
 ```
 
-## Conexão
+## Connection
 
-- Da aplicação rodando no host: `localhost:19092,localhost:29092,localhost:39092`.
-- De outro container na mesma rede do Compose: `kafka-1:9092,kafka-2:9092,kafka-3:9092`.
+- From an application running on the host: `localhost:19092,localhost:29092,localhost:39092`.
+- From another container on the same Compose network: `kafka-1:9092,kafka-2:9092,kafka-3:9092`.
 - Schema Registry: http://localhost:8082.
 - Kafka UI: http://localhost:8081.
-- A porta 8080 fica livre para o serviço da aplicação.
 
-Cada broker tem dois listeners: `INTERNAL` (porta 9092, entre containers) e `EXTERNAL` (porta 19092/29092/39092, para o host). O listener `CONTROLLER` (9093) é só do quórum KRaft.
+Each broker has two listeners: `INTERNAL` (port 9092, between containers) and `EXTERNAL` (port 19092/29092/39092, for the host). The `CONTROLLER` listener (9093) is used only by the KRaft quorum.
 
-## Configuração do cluster
+## Cluster configuration
 
-| Parâmetro | Valor | Motivo |
+| Parameter | Value | Reason |
 |---|---|---|
-| Modo | KRaft, 3 nós com papéis broker e controller | Sem ZooKeeper; quórum tolera 1 falha |
-| `default.replication.factor` | 3 | Cada partição existe nos 3 brokers |
-| `min.insync.replicas` | 2 | Com `acks=all`, escrita exige 2 réplicas; tolera 1 broker fora |
-| `offsets.topic.replication.factor` | 3 | Offsets de consumer groups replicados |
-| `transaction.state.log.replication.factor` / `min.isr` | 3 / 2 | Suporta producer transacional |
-| `num.partitions` | 3 | Padrão, usado só se o tópico não definir |
-| `auto.create.topics.enable` | false | Tópicos são criados de propósito pelo script |
-| `group.initial.rebalance.delay.ms` | 0 | Consumer groups sobem sem atraso em dev |
+| Mode | KRaft, 3 nodes with broker and controller roles | No ZooKeeper; the quorum tolerates 1 failure |
+| `default.replication.factor` | 3 | Every partition exists on all 3 brokers |
+| `min.insync.replicas` | 2 | With `acks=all`, a write needs 2 replicas; tolerates 1 broker down |
+| `offsets.topic.replication.factor` | 3 | Consumer group offsets are replicated |
+| `transaction.state.log.replication.factor` / `min.isr` | 3 / 2 | Supports transactional producers |
+| `num.partitions` | 3 | Default, used only if a topic does not define it |
+| `auto.create.topics.enable` | false | Topics are created deliberately by the script |
+| `group.initial.rebalance.delay.ms` | 0 | Consumer groups start without delay in dev |
 
-## Tópicos
+## Topics
 
-Definidos na variável `TOPICS` de `docker/create-topics.sh`, no formato `nome:partições:replicação`.
+Defined in the `TOPICS` variable of `docker/create-topics.sh`, in the format `name:partitions:replication`.
 
-| Tópico | Partições | Replicação | Uso planejado |
+| Topic | Partitions | Replication | Planned use |
 |---|---|---|---|
-| `payments.transfers` | 6 | 3 | Comandos/eventos de transferência |
-| `payments.transfers.dlq` | 3 | 3 | Mensagens que falharam após retries |
-| `ledger.events` | 6 | 3 | Eventos imutáveis do ledger |
-| `ad.clicks` | 6 | 3 | Cliques brutos para agregação |
-| `ad.clicks.aggregated` | 3 | 3 | Contagens por janela |
+| `payments.transfers` | 6 | 3 | Transfer commands/events |
+| `payments.transfers.dlq` | 3 | 3 | Messages that failed after retries (dead letter queue) |
+| `ledger.events` | 6 | 3 | Immutable ledger events |
+| `ad.clicks` | 6 | 3 | Raw clicks for aggregation |
+| `ad.clicks.aggregated` | 3 | 3 | Counts per window |
 
-Para adicionar um tópico, inclua uma linha em `TOPICS` e rode novamente:
+To add a topic, add a line to `TOPICS` and run again:
 
 ```bash
 docker compose -f docker/docker-compose.yml up kafka-init
 ```
 
-Alternativamente, criação manual:
+Alternatively, create one manually:
 
 ```bash
-docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --create --topic meu.topico --partitions 6 --replication-factor 3
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --create --topic my.topic --partitions 6 --replication-factor 3
 ```
 
-## Experimentos de falha
+## Failure experiments
 
-Derrubar e restaurar um broker:
+Stop and restore a broker:
 
 ```bash
 docker compose -f docker/docker-compose.yml stop kafka-2
@@ -100,17 +100,17 @@ docker compose -f docker/docker-compose.yml stop kafka-2
 docker compose -f docker/docker-compose.yml start kafka-2
 ```
 
-Ver líderes e ISR de um tópico:
+See leaders and ISR (in-sync replicas) of a topic:
 
 ```bash
 docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic payments.transfers
 ```
 
-Com 1 broker parado, escritas com `acks=all` continuam funcionando (2 réplicas em sincronia). Com 2 parados, falham com `NotEnoughReplicas`, e o quórum KRaft também perde a maioria.
+With 1 broker stopped, `acks=all` writes keep working (2 replicas in sync). With 2 stopped, they fail with `NotEnoughReplicas`, and the KRaft quorum also loses its majority. A step-by-step guide is in [kafka-experiments.md](kafka-experiments.md).
 
-## Limitações conhecidas
+## Known limitations
 
-- Sem volumes: `down` apaga todos os dados.
-- Sem autenticação nem TLS (PLAINTEXT), apenas para uso local.
-- A imagem `provectuslabs/kafka-ui:latest` não tem versão fixada.
-- O nome com ponto e o underscore podem colidir em métricas, e o Kafka avisa disso na criação dos tópicos. Evite misturar os dois separadores nos nomes.
+- No volumes for Kafka: `down` deletes all its data.
+- No authentication or TLS (PLAINTEXT), for local use only.
+- The `provectuslabs/kafka-ui:latest` image is not version-pinned.
+- Topic names that mix a dot and an underscore can collide in metrics, and Kafka warns about this when topics are created. Avoid mixing both separators in names.

@@ -1,5 +1,5 @@
-# Cluster Kafka local: 3 brokers KRaft (sem ZooKeeper) + Schema Registry + Kafka UI + criação de tópicos
-# Uso (a partir da raiz): docker compose -f docker/docker-compose.yml up -d
+# Local environment: Kafka cluster (3 KRaft brokers) + Schema Registry + Kafka UI + topic creation + PostgreSQL
+# Usage (from the project root): docker compose -f docker/docker-compose.yml up -d
 name: events-processor
 
 x-kafka-common: &kafka-common
@@ -89,3 +89,23 @@ services:
     volumes:
       - ./create-topics.sh:/create-topics.sh:ro
     entrypoint: ["/bin/sh", "/create-topics.sh"]
+
+  postgres:
+    image: postgres:17
+    container_name: postgres
+    restart: unless-stopped
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-events_processor}
+      POSTGRES_USER: ${POSTGRES_USER:-events}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-events}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:

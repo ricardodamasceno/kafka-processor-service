@@ -1,11 +1,11 @@
 #!/bin/sh
-# Cria os tópicos do laboratório. Idempotente (--if-not-exists).
+# Creates the project topics. Idempotent (--if-not-exists).
 set -e
 
 BOOTSTRAP="${BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}"
 KAFKA_TOPICS="/opt/kafka/bin/kafka-topics.sh"
 
-# nome:partições:replicação
+# name:partitions:replication
 TOPICS="
 payments.transfers:6:3
 payments.transfers.dlq:3:3
@@ -18,10 +18,10 @@ for entry in $TOPICS; do
   name=$(echo "$entry" | cut -d: -f1)
   partitions=$(echo "$entry" | cut -d: -f2)
   replication=$(echo "$entry" | cut -d: -f3)
-  echo "Criando tópico $name (partitions=$partitions, rf=$replication)"
+  echo "Creating topic $name (partitions=$partitions, replication=$replication)"
   "$KAFKA_TOPICS" --bootstrap-server "$BOOTSTRAP" --create --if-not-exists \
     --topic "$name" --partitions "$partitions" --replication-factor "$replication"
 done
 
-echo "Tópicos existentes:"
+echo "Existing topics:"
 "$KAFKA_TOPICS" --bootstrap-server "$BOOTSTRAP" --list

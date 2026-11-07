@@ -1,5 +1,14 @@
+buildscript {
+    dependencies {
+        // PostgreSQL driver and Flyway module used by the plugin tasks (not by the application)
+        classpath 'org.postgresql:postgresql:42.7.14'
+        classpath 'org.flywaydb:flyway-database-postgresql:13.12.1'
+    }
+}
+
 plugins {
     id 'java'
+    id 'org.flywaydb.flyway' version '13.12.1'
 }
 
 group = 'com.event.producer'
@@ -17,4 +26,15 @@ dependencies {
 
 test {
     useJUnitPlatform()
+}
+
+// Flyway: migrations run only when you execute `./gradlew flywayMigrate`.
+// Nothing here ties migrations to application startup or to other tasks (build, test, run).
+// Default values point to the PostgreSQL in docker/docker-compose.yml and can be
+// overridden with the DB_URL, DB_USER and DB_PASSWORD environment variables.
+flyway {
+    url = System.getenv('DB_URL') ?: 'jdbc:postgresql://localhost:5432/events_processor'
+    user = System.getenv('DB_USER') ?: 'events'
+    password = System.getenv('DB_PASSWORD') ?: 'events'
+    locations = ['filesystem:src/main/resources/db/migration']
 }

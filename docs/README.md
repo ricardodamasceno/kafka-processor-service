@@ -1,18 +1,20 @@
-# Documentação
+# Documentation
 
-Convenção: pasta `docs/` na raiz, com decisões de arquitetura registradas como ADRs (Architecture Decision Records, formato Michael Nygard) em `docs/adr/`.
+Convention: a `docs/` folder at the project root, with architecture decisions recorded as ADRs (Architecture Decision Records, Michael Nygard format) in `docs/adr/`.
 
-## Índice
+## Index
 
-- [Cluster Kafka local](kafka-cluster-local.md): como subir e usar o ambiente em `docker/`.
-- [Experimentos com o cluster Kafka](experimentos-kafka.md): roteiro prático de chave, consumer groups, falhas, `acks` e replay.
+- [Local Kafka cluster](kafka-cluster-local.md): how to start and use the environment in `docker/`.
+- [Database and migrations](database.md): local PostgreSQL and Flyway (manual migrations).
+- [Kafka cluster experiments](kafka-experiments.md): hands-on guide covering keys, consumer groups, failures, `acks` and replay.
 
-## Decisões de arquitetura (ADRs)
+## Architecture decisions (ADRs)
 
-- [0001. Cluster Kafka local com 3 brokers em KRaft](adr/0001-cluster-kafka-local-kraft-3-brokers.md)
+- [0001. Local Kafka cluster with 3 brokers in KRaft mode](adr/0001-local-kafka-cluster-kraft-3-brokers.md)
 
-## Regras
+## Rules
 
-- ADRs são numerados em sequência (`NNNN-titulo-em-kebab-case.md`) e nunca são apagados. Uma decisão substituída recebe o status `Substituída por NNNN`.
-- Cada ADR tem: Status, Contexto, Decisão e Consequências.
-- Guias de uso (como rodar, operar) ficam na raiz de `docs/`, em arquivos nomeados pelo assunto.
+- ADRs are numbered sequentially (`NNNN-title-in-kebab-case.md`) and are never deleted. A superseded decision gets the status `Superseded by NNNN`.
+- Each ADR has: Status, Context, Decision and Consequences.
+- Usage guides (how to run, how to operate) live in the root of `docs/`, in files named after their subject.
+- Everything in the project (documentation, code comments, scripts, file names) is written in English.
