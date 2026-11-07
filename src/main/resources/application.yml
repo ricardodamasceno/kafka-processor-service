@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: events-processor-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/events_processor}
+    username: ${DB_USER:events}
+    password: ${DB_PASSWORD:events}
+  jpa:
+    # Schema is owned by Flyway migrations. Hibernate only checks that the entities match it.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+server:
+  port: 8080
+
+app:
+  pagination:
+    default-page-size: 20
+    max-page-size: 100

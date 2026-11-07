@@ -8,8 +8,13 @@ buildscript {
 
 plugins {
     id 'java'
+    id 'org.springframework.boot' version '4.1.2'
+    id 'io.spring.dependency-management' version '1.1.7'
     id 'org.flywaydb.flyway' version '13.12.1'
 }
+
+// Pin Lombok to a release that supports the JDK in use (overrides the Spring Boot managed version).
+ext['lombok.version'] = '1.18.48'
 
 group = 'com.event.producer'
 version = '1.0-SNAPSHOT'
@@ -19,6 +24,15 @@ repositories {
 }
 
 dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // Lombok generates boilerplate (getters, constructors, null checks) at compile time only.
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
     testImplementation platform('org.junit:junit-bom:6.0.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -29,7 +43,9 @@ test {
 }
 
 // Flyway: migrations run only when you execute `./gradlew flywayMigrate`.
-// Nothing here ties migrations to application startup or to other tasks (build, test, run).
+// The Spring Boot Flyway integration is intentionally NOT a dependency, so the
+// application never migrates the database on startup, and nothing here ties migrations
+// to other tasks (build, test, bootRun).
 // Default values point to the PostgreSQL in docker/docker-compose.yml and can be
 // overridden with the DB_URL, DB_USER and DB_PASSWORD environment variables.
 flyway {

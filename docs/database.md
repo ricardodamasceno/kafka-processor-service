@@ -82,6 +82,15 @@ docker compose -f docker/docker-compose.yml down postgres -v
 
 Then start the database again and run `flywayMigrate`.
 
-## Current state
+## Current migrations
 
-There are no migrations yet: the folder only contains a `.gitkeep` (an empty file that makes Git keep the folder). With an empty database, `flywayInfo` shows "No migrations found", which confirms the connection works.
+| Version | File | Creates |
+|---|---|---|
+| V1 | `V1__add_click.sql` | Table `clicks` (id, ad_id, user_id, clicked_at) and an index on `(ad_id, clicked_at)` |
+| V2 | `V2__add_transaction.sql` | Table `transactions` (id, account_id, type, amount, occurred_at), checks on `type` and `amount > 0`, and an index on `(account_id, occurred_at)` |
+
+Timestamps use `TIMESTAMPTZ` and money uses `NUMERIC(19, 2)`.
+
+The Spring Boot application never runs these migrations. Its Hibernate setting is `ddl-auto: validate`, so at startup it only checks that the entities match the tables, and it fails fast if you forgot to run `./gradlew flywayMigrate`.
+
+The folder also contains a `.gitkeep` (an empty file that makes Git keep an empty folder). It is no longer needed now that the folder has migrations.

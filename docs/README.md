@@ -4,6 +4,7 @@ Convention: a `docs/` folder at the project root, with architecture decisions re
 
 ## Index
 
+- [Architecture](architecture.md): Clean Architecture layers, packages and request flow.
 - [Local Kafka cluster](kafka-cluster-local.md): how to start and use the environment in `docker/`.
 - [Database and migrations](database.md): local PostgreSQL and Flyway (manual migrations).
 - [Kafka cluster experiments](kafka-experiments.md): hands-on guide covering keys, consumer groups, failures, `acks` and replay.
