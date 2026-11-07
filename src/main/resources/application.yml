@@ -10,6 +10,26 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  kafka:
+    # External listeners of the local cluster (docker/docker-compose.yml)
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092,localhost:29092,localhost:39092}
+    producer:
+      # Wait for all in-sync replicas (together with min.insync.replicas=2 on the topics)
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        # A retry never writes the same message twice
+        enable.idempotence: true
+    consumer:
+      # A group with no committed offset starts from the oldest message instead of skipping the history
+      auto-offset-reset: earliest
+      # Offsets are committed by the listener container, after each message is processed
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      ack-mode: record
 
 server:
   port: 8080
@@ -18,3 +38,15 @@ app:
   pagination:
     default-page-size: 20
     max-page-size: 100
+  messaging:
+    # How long the API waits for Kafka to acknowledge an event before answering 503
+    send-timeout: 5s
+    # Consumer retry policy before a message goes to the dead letter queue
+    retry:
+      max-retries: 3
+      interval: 1s
+    topics:
+      clicks: ad.clicks
+      clicks-dlq: ad.clicks.dlq
+      transactions: payments.transfers
+      transactions-dlq: payments.transfers.dlq

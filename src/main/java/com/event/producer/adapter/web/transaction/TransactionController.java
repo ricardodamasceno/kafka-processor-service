@@ -2,7 +2,6 @@ package com.event.producer.adapter.web.transaction;
 
 import com.event.producer.adapter.web.PaginationProperties;
 import com.event.producer.application.transaction.TransactionService;
-import com.event.producer.domain.transaction.Transaction;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -15,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.util.List;
 import java.util.UUID;
@@ -32,12 +30,14 @@ class TransactionController {
     private final TransactionService service;
     private final PaginationProperties pagination;
 
+    /**
+     * Creation is asynchronous: the request is validated and published to Kafka, and a consumer
+     * writes the transaction later. So the answer is 202 (accepted), not 201 (created), with an empty body.
+     */
     @PostMapping
-    ResponseEntity<TransactionResponse> create(@Valid @RequestBody TransactionRequest request) {
-        Transaction transaction = service.create(
-                request.accountId(), request.type(), request.amount(), request.occurredAt());
-        var location = ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}").buildAndExpand(transaction.id()).toUri();
-        return ResponseEntity.created(location).body(TransactionResponse.from(transaction));
+    ResponseEntity<Void> create(@Valid @RequestBody TransactionRequest request) {
+        service.requestCreation(request.accountId(), request.type(), request.amount(), request.occurredAt());
+        return ResponseEntity.accepted().build();
     }
 
     @GetMapping("/{id}")

@@ -5,9 +5,9 @@ The project follows **Clean Architecture**: the code is organized in layers, and
 ## The dependency rule
 
 ```
-adapter.web ──┐
-              ├──> application ──> domain
-adapter.persistence ──┘
+adapter.web ──────────┐
+adapter.persistence ──┼──> application ──> domain
+adapter.messaging ────┘
 config (wires everything together)
 ```
 
@@ -43,9 +43,13 @@ What lives here: the operations the system supports. Each service orchestrates d
 
 | Class | Role |
 |---|---|
-| `application.click.ClickService` | `create`, `get`, `list`, `update`, `delete` for clicks |
-| `application.transaction.TransactionService` | The same five operations for transactions |
+| `application.click.ClickService` | `requestCreation`, `persist`, `get`, `list`, `update`, `delete` for clicks |
+| `application.transaction.TransactionService` | The same operations for transactions |
+| `application.click.ClickEventPublisher`, `application.transaction.TransactionEventPublisher` | Outbound ports: how the application announces events. Implemented by the Kafka adapter |
 | `application.shared.NotFoundException` | Thrown when a resource does not exist |
+| `application.shared.PublishFailedException` | Thrown when an event could not be published |
+
+Creation is asynchronous: `requestCreation` validates, assigns an id and publishes an event (it writes nothing to the database); `persist` is called by the Kafka consumer and writes the record. `persist` is idempotent because the id comes with the event. See [ADR 0002](adr/0002-asynchronous-creation-with-kafka.md).
 
 Why a service per entity: it keeps the number of files small for a simple CRUD. A service takes plain values as parameters, so it does not depend on the HTTP JSON format. If a service grows too large, or an operation gets rich business logic (for example a withdrawal), that operation can be extracted into its own use case class.
 
@@ -62,7 +66,7 @@ Adapters convert data between the format the inner layers use and the format an 
 | `ClickController`, `TransactionController` | Receive HTTP, call a service, return HTTP. No business rule |
 | `ClickRequest`, `TransactionRequest` | Input DTOs (data transfer objects) with Bean Validation (`@NotBlank`, `@Positive`...) |
 | `ClickResponse`, `TransactionResponse` | Output DTOs |
-| `ApiExceptionHandler` | Maps `NotFoundException` to 404 and `DomainValidationException` to 400 |
+| `ApiExceptionHandler` | Maps `NotFoundException` to 404, `DomainValidationException` to 400 and `PublishFailedException` to 503 |
 
 DTOs are separate from domain entities so the API contract and the domain model can change independently.
 
@@ -79,19 +83,38 @@ Why two entity classes: JPA needs a no-arg constructor, annotations and a mutabl
 
 Why `ClickJpaRepository` needs no `@Repository`: it is only an interface. Spring Data JPA scans for interfaces that extend `JpaRepository` and creates the implementation at runtime (a proxy backed by `SimpleJpaRepository`, which uses the JPA `EntityManager` and Hibernate).
 
+**`adapter.messaging`** (Kafka: both driving and driven)
+
+| Class | Role |
+|---|---|
+| `ClickKafkaPublisher`, `TransactionKafkaPublisher` | Implement the event publisher ports (the **producers**). Key = entity id |
+| `ClickKafkaConsumer`, `TransactionKafkaConsumer` | `@KafkaListener` classes (the **consumers**). Read the JSON, rebuild the domain object and call `persist` |
+| `ClickMessage`, `TransactionMessage` | The JSON shape on the topic: the contract between producer and consumer, separate from the domain classes |
+| `ClickMessageMapper`, `TransactionMessageMapper` | Static converters between domain and message |
+| `KafkaMessageSender` | Sends a message and waits for the broker acknowledgement (`acks=all`) |
+| `JsonMessageCodec` | Converts messages to and from JSON text. Messages are plain JSON strings on the topic |
+| `KafkaErrorHandlingConfig` | Retries a failed message, then sends it to the dead letter queue (DLQ). Bad payloads and broken domain rules skip the retries |
+| `MessagingProperties` | Topic names, send timeout and retry policy, read from `application.yml` |
+
+Consumer groups: `click-persister` and `transaction-persister`. All instances of the application in a group share the partitions.
+
 ### `config`: frameworks and wiring
 
-`ServiceConfig` is the **composition root**: it creates each service and injects the repository port. Spring picks the adapter that implements the port. This is the only place that knows both sides, and it keeps the application layer free of Spring.
+`ServiceConfig` is the **composition root**: it creates each service and injects the ports (repository and event publisher). Spring picks the adapter that implements each port. This is the only place that knows both sides, and it keeps the application layer free of Spring.
 
 ## How a request flows
 
-`POST /clicks`:
+`POST /clicks` (asynchronous creation):
 
 1. `ClickController` receives the JSON as a `ClickRequest` and validates its format.
-2. It calls `ClickService.create(adId, userId, clickedAt)`.
-3. The service creates a `Click` (the domain validates its rules) and calls `ClickRepository.save`.
-4. `ClickRepositoryAdapter` converts the `Click` to a `ClickJpaEntity` and saves it through Spring Data.
-5. The result goes back as a `Click`, then a `ClickResponse`, then JSON with status 201.
+2. It calls `ClickService.requestCreation(adId, userId, clickedAt)`.
+3. The service creates a `Click` (the domain validates its rules and an id is generated) and calls `ClickEventPublisher`.
+4. `ClickKafkaPublisher` serializes a `ClickMessage` and sends it to the `ad.clicks` topic with the id as key. It waits for the broker acknowledgement.
+5. The API answers **202 Accepted** with an empty body (no id and no `Location` header). Nothing is in the database yet.
+6. Later, `ClickKafkaConsumer` reads the message, rebuilds the `Click` and calls `ClickService.persist`.
+7. `ClickRepositoryAdapter` converts the `Click` to a `ClickJpaEntity` and saves it. From now on `GET /clicks/{id}` returns 200 (before that it returns 404). Since the response does not carry the id, a client finds the record with `GET /clicks` (most recent first).
+
+Transactions follow the same path through `payments.transfers`. `GET`, `PUT` and `DELETE` are still synchronous and go straight to the database.
 
 ## Lombok
 
@@ -122,14 +145,16 @@ The pagination limits come from `application.yml` instead of being hard-coded in
 | `app.pagination.default-page-size` | Page size used when the request does not send `size` |
 | `app.pagination.max-page-size` | Upper bound for `size` |
 
-The values are bound to the `PaginationProperties` record (`@ConfigurationProperties`), which also keeps the clamping logic in one place instead of duplicating it in each controller. The controller base paths (`/clicks`, `/transactions`) are written directly in `@RequestMapping`. The `Location` header of a created resource is built from the current request URL.
+The values are bound to the `PaginationProperties` record (`@ConfigurationProperties`), which also keeps the clamping logic in one place instead of duplicating it in each controller. The controller base paths (`/clicks`, `/transactions`) are written directly in `@RequestMapping`.
+The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.max-retries`, `retry.interval`, `topics.*`), bound to `MessagingProperties`. The connection settings (`bootstrap-servers`, `acks=all`, idempotent producer, `auto-offset-reset: earliest`, manual commit per record) are under `spring.kafka`.
 
 ## Testing strategy
 
 - **Domain tests** (`ClickTest`, `TransactionTest`): pure Java, no Spring, no database.
 - **Mapper tests** (`ClickMapperTest`, `TransactionMapperTest`): check that the conversion in both directions loses nothing.
-- **Service tests** (`ClickServiceTest`): use `InMemoryClickRepository`, a test double that implements the port. This works because services depend on the interface, not on JPA.
-- Full-stack behavior was checked by running the application against the Docker Postgres.
+- **Service tests** (`ClickServiceTest`): use `InMemoryClickRepository` and `RecordingClickEventPublisher`, test doubles that implement the ports. This works because services depend on the interfaces, not on JPA or Kafka. They cover: the event is published but nothing is written, invalid data is rejected before publishing, a broker failure surfaces, and `persist` is idempotent.
+- **Message contract tests** (`JsonMessageCodecTest`): JSON round trip of both messages, and rejection of malformed payloads.
+- The asynchronous flow was checked end to end against the Docker Kafka and Postgres: create, consume, read, a duplicated event (one row), and bad payloads (sent to the DLQ). There are no automated integration tests yet.
 
 ## Trade-offs and known limitations
 
@@ -137,5 +162,7 @@ The values are bound to the `PaginationProperties` record (`@ConfigurationProper
 - One service per entity was chosen over one class per operation (use case) to reduce the number of files. The trade-off is that a service can grow large and accumulate dependencies as business logic increases.
 - Update is done in two repository calls (check existence, then save), not in a single database transaction. For a plain CRUD this is acceptable; for logic that needs atomicity, add a transaction boundary.
 - Transactions here are fully editable and deletable because CRUD was requested. A real ledger would normally be append-only (corrections are new entries).
+- Creation is eventually consistent: right after a 202, `GET` returns 404 until the consumer persists the record, and an `update` or `delete` sent too early also returns 404. Update and delete are still synchronous.
+- Delivery is at-least-once. Duplicates are harmless because the id is generated before publishing and `persist` overwrites the same row. A message in the DLQ needs a human or a job to look at it: there is no automatic reprocessing yet.
 - Paging is offset-based (`page` and `size`, size capped by `app.pagination.max-page-size`).
 - Identifiers are random UUIDs generated by the service.

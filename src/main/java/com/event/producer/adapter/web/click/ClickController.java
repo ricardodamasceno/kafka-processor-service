@@ -2,7 +2,6 @@ package com.event.producer.adapter.web.click;
 
 import com.event.producer.adapter.web.PaginationProperties;
 import com.event.producer.application.click.ClickService;
-import com.event.producer.domain.click.Click;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -15,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.util.List;
 import java.util.UUID;
@@ -32,11 +30,14 @@ class ClickController {
     private final ClickService service;
     private final PaginationProperties pagination;
 
+    /**
+     * Creation is asynchronous: the request is validated and published to Kafka, and a consumer
+     * writes the click later. So the answer is 202 (accepted), not 201 (created), with an empty body.
+     */
     @PostMapping
-    ResponseEntity<ClickResponse> create(@Valid @RequestBody ClickRequest request) {
-        Click click = service.create(request.adId(), request.userId(), request.clickedAt());
-        var location = ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}").buildAndExpand(click.id()).toUri();
-        return ResponseEntity.created(location).body(ClickResponse.from(click));
+    ResponseEntity<Void> create(@Valid @RequestBody ClickRequest request) {
+        service.requestCreation(request.adId(), request.userId(), request.clickedAt());
+        return ResponseEntity.accepted().build();
     }
 
     @GetMapping("/{id}")

@@ -10,7 +10,10 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Application service for clicks: orchestrates the click operations using the domain port.
+ * Application service for clicks: orchestrates the click operations using the domain ports.
+ * <p>
+ * Creation is asynchronous: {@link #requestCreation} validates and publishes an event, and
+ * {@link #persist} (called by the event consumer) writes the click to the database.
  * <p>
  * It has no Spring annotations; it is wired in {@code config.ServiceConfig}, so the application
  * layer stays independent from the framework.
@@ -19,9 +22,26 @@ import java.util.UUID;
 public class ClickService {
 
     private final ClickRepository repository;
+    private final ClickEventPublisher publisher;
 
-    public Click create(String adId, String userId, Instant clickedAt) {
-        return repository.save(new Click(UUID.randomUUID(), adId, userId, clickedAt));
+    /**
+     * Validates the data (the {@link Click} constructor enforces the domain rules), assigns an id and
+     * publishes the creation event. Nothing is written to the database here.
+     *
+     * @return the click that was accepted; it will exist in the database once the consumer processes the event
+     */
+    public Click requestCreation(String adId, String userId, Instant clickedAt) {
+        Click click = new Click(UUID.randomUUID(), adId, userId, clickedAt);
+        publisher.publishCreationRequested(click);
+        return click;
+    }
+
+    /**
+     * Writes a click to the database. Called by the event consumer. Idempotent: the id comes with the
+     * event, so processing the same event twice (at-least-once delivery) leaves a single row.
+     */
+    public Click persist(Click click) {
+        return repository.save(click);
     }
 
     public Click get(UUID id) {

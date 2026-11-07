@@ -12,6 +12,7 @@ Convention: a `docs/` folder at the project root, with architecture decisions re
 ## Architecture decisions (ADRs)
 
 - [0001. Local Kafka cluster with 3 brokers in KRaft mode](adr/0001-local-kafka-cluster-kraft-3-brokers.md)
+- [0002. Asynchronous creation with Kafka](adr/0002-asynchronous-creation-with-kafka.md)
 
 ## Rules
 

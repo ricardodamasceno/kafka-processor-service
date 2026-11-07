@@ -71,10 +71,11 @@ Defined in the `TOPICS` variable of `docker/create-topics.sh`, in the format `na
 
 | Topic | Partitions | Replication | Planned use |
 |---|---|---|---|
-| `payments.transfers` | 6 | 3 | Transfer commands/events |
+| `payments.transfers` | 6 | 3 | Transaction creation events (consumed by `transaction-persister`) |
 | `payments.transfers.dlq` | 3 | 3 | Messages that failed after retries (dead letter queue) |
 | `ledger.events` | 6 | 3 | Immutable ledger events |
-| `ad.clicks` | 6 | 3 | Raw clicks for aggregation |
+| `ad.clicks` | 6 | 3 | Click creation events (consumed by `click-persister`) and raw clicks for aggregation |
+| `ad.clicks.dlq` | 3 | 3 | Click messages that could not be processed (dead letter queue) |
 | `ad.clicks.aggregated` | 3 | 3 | Counts per window |
 
 To add a topic, add a line to `TOPICS` and run again:

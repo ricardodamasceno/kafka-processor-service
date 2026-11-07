@@ -1,6 +1,7 @@
 package com.event.producer.application.click;
 
 import com.event.producer.application.shared.NotFoundException;
+import com.event.producer.application.shared.PublishFailedException;
 import com.event.producer.domain.click.Click;
 import com.event.producer.domain.shared.DomainValidationException;
 import org.junit.jupiter.api.Test;
@@ -18,18 +19,47 @@ class ClickServiceTest {
     private static final Instant T1 = Instant.parse("2026-11-07T10:00:00Z");
     private static final Instant T2 = Instant.parse("2026-11-07T11:00:00Z");
 
-    private final ClickService service = new ClickService(new InMemoryClickRepository());
+    private final InMemoryClickRepository repository = new InMemoryClickRepository();
+    private final RecordingClickEventPublisher publisher = new RecordingClickEventPublisher();
+    private final ClickService service = new ClickService(repository, publisher);
 
-    @Test
-    void createsAndGetsAClick() {
-        Click created = service.create("ad-1", "user-1", T1);
-
-        assertEquals(created, service.get(created.id()));
+    /** Simulates the full asynchronous flow: request the creation, then the consumer persists the event. */
+    private Click createAndPersist(String adId, String userId, Instant clickedAt) {
+        Click requested = service.requestCreation(adId, userId, clickedAt);
+        return service.persist(requested);
     }
 
     @Test
-    void createRejectsInvalidData() {
-        assertThrows(DomainValidationException.class, () -> service.create(" ", "user-1", T1));
+    void requestCreationPublishesTheEventButDoesNotWriteToTheDatabase() {
+        Click requested = service.requestCreation("ad-1", "user-1", T1);
+
+        assertEquals(List.of(requested), publisher.published);
+        assertThrows(NotFoundException.class, () -> service.get(requested.id()));
+    }
+
+    @Test
+    void requestCreationRejectsInvalidDataBeforePublishing() {
+        assertThrows(DomainValidationException.class, () -> service.requestCreation(" ", "user-1", T1));
+
+        assertTrue(publisher.published.isEmpty());
+    }
+
+    @Test
+    void requestCreationFailsWhenTheBrokerIsUnavailable() {
+        publisher.failing = true;
+
+        assertThrows(PublishFailedException.class, () -> service.requestCreation("ad-1", "user-1", T1));
+    }
+
+    @Test
+    void persistWritesTheClickAndIsIdempotent() {
+        Click requested = service.requestCreation("ad-1", "user-1", T1);
+
+        service.persist(requested);
+        service.persist(requested); // the same event delivered twice (at-least-once)
+
+        assertEquals(requested, service.get(requested.id()));
+        assertEquals(1, service.list(0, 10).size());
     }
 
     @Test
@@ -39,7 +69,7 @@ class ClickServiceTest {
 
     @Test
     void updateReplacesTheData() {
-        Click created = service.create("ad-1", "user-1", T1);
+        Click created = createAndPersist("ad-1", "user-1", T1);
 
         Click updated = service.update(created.id(), "ad-2", "user-1", T2);
 
@@ -54,7 +84,7 @@ class ClickServiceTest {
 
     @Test
     void deleteRemovesTheClick() {
-        Click created = service.create("ad-1", "user-1", T1);
+        Click created = createAndPersist("ad-1", "user-1", T1);
 
         service.delete(created.id());
 
@@ -64,8 +94,8 @@ class ClickServiceTest {
 
     @Test
     void listReturnsMostRecentFirstAndPaginates() {
-        Click older = service.create("ad-1", "user-1", T1);
-        Click newer = service.create("ad-1", "user-2", T2);
+        Click older = createAndPersist("ad-1", "user-1", T1);
+        Click newer = createAndPersist("ad-1", "user-2", T2);
 
         assertEquals(List.of(newer, older), service.list(0, 10));
         assertEquals(List.of(newer), service.list(0, 1));

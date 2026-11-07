@@ -11,6 +11,7 @@ payments.transfers:6:3
 payments.transfers.dlq:3:3
 ledger.events:6:3
 ad.clicks:6:3
+ad.clicks.dlq:3:3
 ad.clicks.aggregated:3:3
 "
 
