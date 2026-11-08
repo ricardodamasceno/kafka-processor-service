@@ -3,6 +3,7 @@ package com.event.producer.adapter.messaging.click;
 import com.event.producer.adapter.messaging.JsonMessageCodec;
 import com.event.producer.application.click.ClickService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component;
  * the message). All instances of the application share the group {@code click-persister}, so each
  * partition is processed by only one of them.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 class ClickKafkaConsumer {
@@ -23,6 +25,7 @@ class ClickKafkaConsumer {
 
     @KafkaListener(topics = "${app.messaging.topics.clicks}", groupId = "click-persister")
     void onMessage(String payload) {
+        log.info("Event arrived to register Click: {}", payload);
         ClickMessage message = codec.fromJson(payload, ClickMessage.class);
         service.persist(ClickMessageMapper.toDomain(message));
     }
