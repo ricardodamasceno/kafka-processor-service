@@ -13,6 +13,14 @@ curl -sS --fail-with-body -X PUT "$CONNECT_URL/connectors/$CONNECTOR_NAME/config
   -H "Content-Type: application/json" \
   -d @"$CONFIG"
 echo
+
+# Right after the registration Connect has no status yet and answers 404, so wait a few seconds for it.
 echo "Status:"
-curl -sS "$CONNECT_URL/connectors/$CONNECTOR_NAME/status"
-echo
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  status="$(curl -sS "$CONNECT_URL/connectors/$CONNECTOR_NAME/status")"
+  case "$status" in
+    *'"error_code":404'*) sleep 2 ;;
+    *) break ;;
+  esac
+done
+echo "$status"

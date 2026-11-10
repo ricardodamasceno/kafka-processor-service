@@ -4,9 +4,9 @@ Debezium reads the row changes of selected tables from the PostgreSQL write-ahea
 
 ## Current state
 
-The infrastructure is ready: PostgreSQL with logical decoding, Kafka Connect with Debezium, the connector configuration, and the `transactions-cdc-events` topic. The `transactions` table is the only table captured, and migration V5 sets `REPLICA IDENTITY FULL` on it (it takes effect when the migration is applied).
+The infrastructure is ready: PostgreSQL with logical decoding, Kafka Connect with Debezium, the connector configuration, and the `transactions-cdc-events` topic. The `transactions` table is the only table captured, and migration V1 sets `REPLICA IDENTITY FULL` on it (it takes effect when the migration is applied).
 
-**The application uses it** (see [ADR 0005](adr/0005-pending-transactions-and-cdc-events.md)). `POST /transactions` saves the transaction as `PENDING` (migration V6 adds the `status` column) and does not call Kafka. Debezium publishes the change to `transactions-cdc-events`, and `TransactionChangeConsumer` reads it. For now the consumer only logs each change. The next step is a reaction: an executor that picks up the `PENDING` insert and moves the transaction on, and a notifier for the final state.
+**The application uses it** (see [ADR 0005](adr/0005-pending-transactions-and-cdc-events.md)). `POST /transactions` saves the transaction as `PENDING` (the `status` column is part of migration V1) and does not call Kafka. Debezium publishes the change to `transactions-cdc-events`, and `TransactionChangeConsumer` reads it. For now the consumer only logs each change. The next step is a reaction: an executor that picks up the `PENDING` insert and moves the transaction on, and a notifier for the final state.
 
 ## Convention
 

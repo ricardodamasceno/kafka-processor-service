@@ -83,15 +83,19 @@ docker compose -f docker/docker-compose.yml down postgres -v
 
 Then start the database again and run `flywayMigrate`.
 
+To recreate only the application database, keeping the container and the volume:
+
+```bash
+docker exec postgres psql -U events -d postgres -c "DROP DATABASE events_processor WITH (FORCE);" -c "CREATE DATABASE events_processor;"
+```
+
 ## Current migrations
 
 | Version | File | Creates |
 |---|---|---|
-| V1 | `V1__add_click.sql` | Table `clicks` (id, ad_id, user_id, clicked_at) and an index on `(ad_id, clicked_at)`. Removed again by V4 |
-| V2 | `V2__add_transaction.sql` | Table `transactions` (id, account_id, type, amount, occurred_at), checks on `type` and `amount > 0`, and an index on `(account_id, occurred_at)` |
-| V4 | `V4__drop_click.sql` | Drops the `clicks` table (clicks are no longer part of the service). V1 stays in the history because an applied migration is never edited |
-| V5 | `V5__enable_cdc_for_transactions.sql` | Sets `REPLICA IDENTITY FULL` on `transactions`, so the change events published by Debezium carry the complete old row. See [debezium.md](debezium.md) |
-| V6 | `V6__add_transaction_status.sql` | Adds `status` to `transactions` (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`). Existing rows become `COMPLETED`, and the default is dropped afterwards so every insert states its status |
+| V1 | `V1__add_transaction.sql` | Table `transactions` (id, account_id, type, amount, occurred_at, status), checks on `type`, `amount > 0` and `status` (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, no default), an index on `(account_id, occurred_at)`, and `REPLICA IDENTITY FULL` so the change events published by Debezium carry the complete old row. See [debezium.md](debezium.md) |
+
+The history was rewritten on 2026-11-10: the local database was recreated, so the migrations of the removed `clicks` table were dropped and the others were merged into a single `V1`. That is only possible because nothing outside the local environment had applied them. Once a migration has run anywhere else, it must not be edited or renumbered, and a change goes into a new migration.
 
 Timestamps use `TIMESTAMPTZ` and money uses `NUMERIC(19, 2)`.
 

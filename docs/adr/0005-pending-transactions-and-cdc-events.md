@@ -11,7 +11,7 @@
 
 - `POST /transactions` validates the request, assigns an id and **saves the transaction with the status `PENDING`**. It then answers `202 Accepted` with an empty body. The application does not call Kafka.
 - Debezium publishes the change to `transactions-cdc-events`, and consumers read it from there. Today `TransactionChangeConsumer` (group `transaction-change-logger`) only logs each change. It is where a reaction will go, such as executing a transaction when a `PENDING` row is inserted.
-- The `transactions` table gets a `status` column (migration V6): `PENDING`, `PROCESSING`, `COMPLETED` or `FAILED`. Existing rows become `COMPLETED`, because the previous flow only created final rows.
+- The `transactions` table has a `status` column, defined in its creation migration (V1): `PENDING`, `PROCESSING`, `COMPLETED` or `FAILED`. There is no default, so every insert states its status.
 - `PUT` keeps the current status, because the request does not carry one. `GET` returns it.
 - The `202` with an empty body stays, because processing is still asynchronous.
 
