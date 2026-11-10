@@ -2,6 +2,7 @@ package com.event.producer.domain;
 
 import com.event.producer.domain.shared.DomainValidationException;
 import com.event.producer.domain.transaction.Transaction;
+import com.event.producer.domain.transaction.TransactionStatus;
 import com.event.producer.domain.transaction.TransactionType;
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class TransactionTest {
 
     private static Transaction with(String accountId, TransactionType type, BigDecimal amount) {
-        return new Transaction(UUID.randomUUID(), accountId, type, amount, Instant.parse("2026-11-07T10:00:00Z"));
+        return new Transaction(UUID.randomUUID(), accountId, type, amount, Instant.parse("2026-11-07T10:00:00Z"),
+                TransactionStatus.PENDING);
     }
 
     @Test
@@ -55,5 +57,7 @@ class TransactionTest {
         assertThrows(NullPointerException.class, () -> with("acc-1", null, BigDecimal.ONE));
         assertThrows(NullPointerException.class, () -> with("acc-1", TransactionType.DEPOSIT, null));
         assertThrows(NullPointerException.class, () -> with(null, TransactionType.DEPOSIT, BigDecimal.ONE));
+        assertThrows(NullPointerException.class, () -> new Transaction(UUID.randomUUID(), "acc-1",
+                TransactionType.DEPOSIT, BigDecimal.ONE, Instant.parse("2026-11-07T10:00:00Z"), null));
     }
 }

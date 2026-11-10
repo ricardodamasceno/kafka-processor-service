@@ -31,12 +31,12 @@ class TransactionController {
     private final PaginationProperties pagination;
 
     /**
-     * Creation is asynchronous: the request is validated and published to Kafka, and a consumer
-     * writes the transaction later. So the answer is 202 (accepted), not 201 (created), with an empty body.
+     * The transaction is saved as {@code PENDING} and processed later, asynchronously. So the answer is
+     * 202 (accepted), not 201 (created), with an empty body.
      */
     @PostMapping
     ResponseEntity<Void> create(@Valid @RequestBody TransactionRequest request) {
-        service.requestCreation(request.accountId(), request.type(), request.amount(), request.occurredAt());
+        service.create(request.accountId(), request.type(), request.amount(), request.occurredAt());
         return ResponseEntity.accepted().build();
     }
 

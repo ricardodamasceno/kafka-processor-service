@@ -1,7 +1,6 @@
 package com.event.producer.adapter.web;
 
 import com.event.producer.application.shared.NotFoundException;
-import com.event.producer.application.shared.PublishFailedException;
 import com.event.producer.domain.shared.DomainValidationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -11,7 +10,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 /**
  * Translates exceptions from the inner layers into HTTP responses (RFC 9457 "problem details"):
- * not found to 404, a broken domain rule to 400, and a broker failure to 503.
+ * not found to 404 and a broken domain rule to 400.
  * The domain and application layers throw plain exceptions; only this web class knows about
  * status codes. The parent class already maps framework errors (invalid JSON, bad request
  * body validation, bad path variable) to 400.
@@ -22,12 +21,6 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(NotFoundException.class)
     ProblemDetail handleNotFound(NotFoundException exception) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, exception.getMessage());
-    }
-
-    @ExceptionHandler(PublishFailedException.class)
-    ProblemDetail handlePublishFailed(PublishFailedException exception) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
-                "The request could not be accepted right now. Please try again.");
     }
 
     @ExceptionHandler(DomainValidationException.class)

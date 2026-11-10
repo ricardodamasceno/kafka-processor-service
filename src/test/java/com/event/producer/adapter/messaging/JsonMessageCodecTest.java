@@ -1,6 +1,7 @@
 package com.event.producer.adapter.messaging;
 
-import com.event.producer.adapter.messaging.transaction.TransactionMessage;
+import com.event.producer.adapter.messaging.transaction.TransactionChangeMessage;
+import com.event.producer.domain.transaction.TransactionStatus;
 import com.event.producer.domain.transaction.TransactionType;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
@@ -10,35 +11,77 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Checks the JSON contract of the Kafka messages without starting Kafka or Spring. */
+/**
+ * Checks that the changes Debezium publishes can be read, without starting Kafka or Spring.
+ * The samples have the shape of real messages: the row fields use the column names, {@code amount} is text,
+ * the timestamp is ISO 8601 in UTC, and the envelope carries fields this service does not read.
+ */
 class JsonMessageCodecTest {
+
+    private static final UUID ID = UUID.fromString("3f2b8f36-0000-4000-8000-000000000001");
 
     private final JsonMessageCodec codec = new JsonMessageCodec(JsonMapper.builder().build());
 
+    private static String row(String amount, String status) {
+        return "{\"id\":\"" + ID + "\",\"account_id\":\"acc-1\",\"type\":\"DEPOSIT\",\"amount\":\"" + amount
+                + "\",\"occurred_at\":\"2026-11-10T12:00:00.000000Z\",\"status\":\"" + status + "\"}";
+    }
+
+    private static String envelope(String op, String before, String after) {
+        return "{\"before\":" + before + ",\"after\":" + after + ",\"source\":{\"db\":\"events_processor\"},"
+                + "\"op\":\"" + op + "\",\"ts_ms\":1789000000000}";
+    }
+
     @Test
-    void transactionMessageSurvivesARoundTrip() {
-        TransactionMessage message = new TransactionMessage(UUID.randomUUID(), "acc-1", TransactionType.DEPOSIT,
-                new BigDecimal("12.30"), Instant.parse("2026-11-07T10:00:00Z"));
+    void readsAnInsert() {
+        TransactionChangeMessage change = codec.fromJson(
+                envelope("c", "null", row("10.50", "PENDING")), TransactionChangeMessage.class);
 
-        String json = codec.toJson(message);
+        assertEquals("c", change.op());
+        assertNull(change.before());
+        TransactionChangeMessage.Row after = change.after();
+        assertEquals(ID, after.id());
+        assertEquals("acc-1", after.accountId());
+        assertEquals(TransactionType.DEPOSIT, after.type());
+        assertEquals(new BigDecimal("10.50"), after.amount());
+        assertEquals(Instant.parse("2026-11-10T12:00:00Z"), after.occurredAt());
+        assertEquals(TransactionStatus.PENDING, after.status());
+        assertEquals(after, change.current());
+    }
 
-        assertTrue(json.contains("\"occurredAt\":\"2026-11-07T10:00:00Z\""), json);
-        assertEquals(message, codec.fromJson(json, TransactionMessage.class));
+    @Test
+    void readsAnUpdateWithTheOldAndTheNewRow() {
+        TransactionChangeMessage change = codec.fromJson(
+                envelope("u", row("10.50", "PENDING"), row("10.50", "COMPLETED")), TransactionChangeMessage.class);
+
+        assertEquals("u", change.op());
+        assertEquals(TransactionStatus.PENDING, change.before().status());
+        assertEquals(TransactionStatus.COMPLETED, change.after().status());
+        assertEquals(change.after(), change.current());
+    }
+
+    @Test
+    void readsADeleteAndReportsTheDeletedRowAsCurrent() {
+        TransactionChangeMessage change = codec.fromJson(
+                envelope("d", row("10.50", "COMPLETED"), "null"), TransactionChangeMessage.class);
+
+        assertEquals("d", change.op());
+        assertNull(change.after());
+        assertEquals(ID, change.current().id());
     }
 
     @Test
     void malformedJsonIsReportedAsInvalidMessage() {
-        assertThrows(InvalidMessageException.class, () -> codec.fromJson("not json", TransactionMessage.class));
+        assertThrows(InvalidMessageException.class, () -> codec.fromJson("not json", TransactionChangeMessage.class));
     }
 
     @Test
     void unknownEnumValueIsReportedAsInvalidMessage() {
-        String json = "{\"id\":\"" + UUID.randomUUID() + "\",\"accountId\":\"a\",\"type\":\"BONUS\","
-                + "\"amount\":1,\"occurredAt\":\"2026-11-07T10:00:00Z\"}";
+        String json = envelope("c", "null", row("1.00", "PENDING").replace("DEPOSIT", "BONUS"));
 
-        assertThrows(InvalidMessageException.class, () -> codec.fromJson(json, TransactionMessage.class));
+        assertThrows(InvalidMessageException.class, () -> codec.fromJson(json, TransactionChangeMessage.class));
     }
 }

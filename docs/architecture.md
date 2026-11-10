@@ -30,6 +30,7 @@ What lives here: the entities and the rules that are always true, plus the **por
 |---|---|
 | `domain.transaction.Transaction` | Entity: an immutable record that validates itself in the constructor. Money is `BigDecimal`, amount is always positive with at most 2 decimals |
 | `domain.transaction.TransactionType` | Enum: `DEPOSIT`, `WITHDRAWAL` |
+| `domain.transaction.TransactionStatus` | Enum: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`. Where a transaction is in its life |
 | `domain.transaction.TransactionRepository` | Port: the contract for storing transactions. Defined here, implemented elsewhere |
 | `domain.shared.DomainValidationException` | Thrown when a domain rule is violated |
 
@@ -41,12 +42,10 @@ What lives here: the operations the system supports. Each service orchestrates d
 
 | Class | Role |
 |---|---|
-| `application.transaction.TransactionService` | `requestCreation`, `persist`, `get`, `list`, `update`, `delete` for transactions |
-| `application.transaction.TransactionEventPublisher` | Outbound port: how the application announces events. Implemented by the Kafka adapter |
+| `application.transaction.TransactionService` | `create`, `get`, `list`, `update`, `delete` for transactions |
 | `application.shared.NotFoundException` | Thrown when a resource does not exist |
-| `application.shared.PublishFailedException` | Thrown when an event could not be published |
 
-Creation is asynchronous: `requestCreation` validates, assigns an id and publishes an event (it writes nothing to the database); `persist` is called by the Kafka consumer and writes the record. `persist` is idempotent because the id comes with the event. See [ADR 0002](adr/0002-asynchronous-creation-with-kafka.md).
+`create` validates, assigns an id and saves the transaction as `PENDING`. What happens next is driven by the changes of the `transactions` table, which Debezium publishes to Kafka: the application never calls Kafka to announce an event. See [ADR 0005](adr/0005-pending-transactions-and-cdc-events.md) and [debezium.md](debezium.md).
 
 Why a service per entity: it keeps the number of files small for a simple CRUD. A service takes plain values as parameters, so it does not depend on the HTTP JSON format. If a service grows too large, or an operation gets rich business logic (for example a withdrawal), that operation can be extracted into its own use case class.
 
@@ -63,7 +62,7 @@ Adapters convert data between the format the inner layers use and the format an 
 | `TransactionController` | Receives HTTP, calls a service, returns HTTP. No business rule |
 | `TransactionRequest` | Input DTO (data transfer object) with Bean Validation (`@NotBlank`, `@Positive`...) |
 | `TransactionResponse` | Output DTO |
-| `ApiExceptionHandler` | Maps `NotFoundException` to 404, `DomainValidationException` to 400 and `PublishFailedException` to 503 |
+| `ApiExceptionHandler` | Maps `NotFoundException` to 404 and `DomainValidationException` to 400 |
 
 DTOs are separate from domain entities so the API contract and the domain model can change independently.
 
@@ -80,38 +79,35 @@ Why two entity classes: JPA needs a no-arg constructor, annotations and a mutabl
 
 Why `TransactionJpaRepository` needs no `@Repository`: it is only an interface. Spring Data JPA scans for interfaces that extend `JpaRepository` and creates the implementation at runtime (a proxy backed by `SimpleJpaRepository`, which uses the JPA `EntityManager` and Hibernate).
 
-**`adapter.messaging`** (Kafka: both driving and driven)
+**`adapter.messaging`** (Kafka: the application reads the changes of the `transactions` table)
 
 | Class | Role |
 |---|---|
-| `TransactionKafkaPublisher` | Implements the event publisher port (the **producer**). Key = entity id |
-| `TransactionKafkaConsumer` | `@KafkaListener` class (the **consumer**). Reads the JSON, rebuilds the domain object and calls `persist` |
-| `TransactionMessage` | The JSON shape on the topic: the contract between producer and consumer, separate from the domain class |
-| `TransactionMessageMapper` | Static converter between domain and message |
-| `KafkaMessageSender` | Sends a message and waits for the broker acknowledgement (`acks=all`) |
-| `JsonMessageCodec` | Converts messages to and from JSON text. Messages are plain JSON strings on the topic |
+| `TransactionChangeConsumer` | `@KafkaListener` class (the **consumer**) of `transactions-cdc-events`. Reads each change and, for now, only logs it |
+| `TransactionChangeMessage` | The JSON shape of a change as Debezium publishes it (`op`, `before`, `after`). The row fields use the column names, so the table schema is the contract of the topic |
+| `JsonMessageCodec` | Reads messages from JSON text. Messages are plain JSON strings on the topic |
 | `KafkaErrorHandlingConfig` | Retries a failed message, then sends it to the dead letter queue (DLQ). Bad payloads and broken domain rules skip the retries |
-| `MessagingProperties` | Topic names, send timeout and retry policy, read from `application.yml` |
+| `MessagingProperties` | Topic names and retry policy, read from `application.yml` |
 
-Consumer group: `transaction-persister`. All instances of the application in a group share the partitions.
+Consumer group: `transaction-change-logger`. All instances of the application in a group share the partitions.
 
 ### `config`: frameworks and wiring
 
-`ServiceConfig` is the **composition root**: it creates each service and injects the ports (repository and event publisher). Spring picks the adapter that implements each port. This is the only place that knows both sides, and it keeps the application layer free of Spring.
+`ServiceConfig` is the **composition root**: it creates each service and injects the ports (the repository). Spring picks the adapter that implements each port. This is the only place that knows both sides, and it keeps the application layer free of Spring.
 
 ## How a request flows
 
-`POST /transactions` (asynchronous creation):
+`POST /transactions`:
 
 1. `TransactionController` receives the JSON as a `TransactionRequest` and validates its format.
-2. It calls `TransactionService.requestCreation(accountId, type, amount, occurredAt)`.
-3. The service creates a `Transaction` (the domain validates its rules and an id is generated) and calls `TransactionEventPublisher`.
-4. `TransactionKafkaPublisher` serializes a `TransactionMessage` and sends it to the `payments-transactions-create` topic with the id as key. It waits for the broker acknowledgement.
-5. The API answers **202 Accepted** with an empty body (no id and no `Location` header). Nothing is in the database yet.
-6. Later, `TransactionKafkaConsumer` reads the message, rebuilds the `Transaction` and calls `TransactionService.persist`.
-7. `TransactionRepositoryAdapter` converts the `Transaction` to a `TransactionJpaEntity` and saves it. From now on `GET /transactions/{id}` returns 200 (before that it returns 404). Since the response does not carry the id, a client finds the record with `GET /transactions` (most recent first).
+2. It calls `TransactionService.create(accountId, type, amount, occurredAt)`.
+3. The service creates a `Transaction` with an id and the status `PENDING` (the domain validates its rules) and saves it through the `TransactionRepository` port.
+4. `TransactionRepositoryAdapter` converts the `Transaction` to a `TransactionJpaEntity` and saves it.
+5. The API answers **202 Accepted** with an empty body (no id and no `Location` header). The row is already in the database, so `GET /transactions/{id}` returns 200 straight away, with the status `PENDING`. Since the response does not carry the id, a client finds the record with `GET /transactions` (most recent first).
+6. Debezium reads the insert from the PostgreSQL write-ahead log and publishes the change to `transactions-cdc-events`.
+7. `TransactionChangeConsumer` reads the change and logs it. Nothing moves the transaction past `PENDING` yet.
 
-`GET`, `PUT` and `DELETE` are still synchronous and go straight to the database.
+`GET`, `PUT` and `DELETE` go straight to the database. Every change to the table, including these, is published to `transactions-cdc-events`. `PUT` keeps the current status, because the request does not carry it.
 
 ## Lombok
 
@@ -143,23 +139,24 @@ The pagination limits come from `application.yml` instead of being hard-coded in
 | `app.pagination.max-page-size` | Upper bound for `size` |
 
 The values are bound to the `PaginationProperties` record (`@ConfigurationProperties`), which also keeps the clamping logic in one place instead of duplicating it in each controller. The controller base path (`/transactions`) is written directly in `@RequestMapping`.
-The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.max-retries`, `retry.interval`, `topics.*`), bound to `MessagingProperties`. The connection settings (`bootstrap-servers`, `acks=all`, idempotent producer, `auto-offset-reset: earliest`, manual commit per record) are under `spring.kafka`.
+The Kafka and DLQ settings live under `app.messaging` (`retry.max-retries`, `retry.interval`, `topics.*`), bound to `MessagingProperties`. The connection settings (`bootstrap-servers`, `acks=all`, idempotent producer, `auto-offset-reset: earliest`, manual commit per record) are under `spring.kafka`.
 
 ## Testing strategy
 
 - **Domain tests** (`TransactionTest`): pure Java, no Spring, no database.
 - **Mapper tests** (`TransactionMapperTest`): check that the conversion in both directions loses nothing.
-- **Service tests** (`TransactionServiceTest`): use `InMemoryTransactionRepository` and `RecordingTransactionEventPublisher`, test doubles that implement the ports. This works because services depend on the interfaces, not on JPA or Kafka. They cover: the event is published but nothing is written, invalid data is rejected before publishing, a broker failure surfaces, and `persist` is idempotent.
-- **Message contract tests** (`JsonMessageCodecTest`): JSON round trip of the transaction message, and rejection of malformed payloads.
-- The asynchronous flow was checked end to end against the Docker Kafka and Postgres: create, consume, read, a duplicated event (one row), and bad payloads (sent to the DLQ). There are no automated integration tests yet.
+- **Service tests** (`TransactionServiceTest`): use `InMemoryTransactionRepository`, a test double that implements the port. This works because services depend on the interface, not on JPA. They cover: a created transaction is `PENDING`, invalid data stores nothing, `update` keeps the status, `delete`, and paging.
+- **Message contract tests** (`JsonMessageCodecTest`): read an insert, an update and a delete in the shape Debezium publishes (including envelope fields the service ignores), and reject malformed payloads and unknown enum values.
+- The flow was checked end to end against the Docker Kafka, Kafka Connect and Postgres, using a scratch database: `POST` saved a `PENDING` row and answered 202, an invalid `POST` answered 400, `PUT` kept the status, and the insert, both updates and the delete reached `transactions-cdc-events` and the consumer, with nothing in the DLQ. There are no automated integration tests yet.
 
 ## Trade-offs and known limitations
 
 - More classes than a simple Spring CRUD (controller, service, repository). The gain is isolation and testability; the cost is mapping code. For a very small project this can feel heavy.
 - One service per entity was chosen over one class per operation (use case) to reduce the number of files. The trade-off is that a service can grow large and accumulate dependencies as business logic increases.
-- Update is done in two repository calls (check existence, then save), not in a single database transaction. For a plain CRUD this is acceptable; for logic that needs atomicity, add a transaction boundary.
+- Update is done in two repository calls (read, then save), not in a single database transaction. For a plain CRUD this is acceptable; for logic that needs atomicity, add a transaction boundary.
 - Transactions here are fully editable and deletable because CRUD was requested. A real ledger would normally be append-only (corrections are new entries).
-- Creation is eventually consistent: right after a 202, `GET` returns 404 until the consumer persists the record, and an `update` or `delete` sent too early also returns 404. Update and delete are still synchronous.
-- Delivery is at-least-once. Duplicates are harmless because the id is generated before publishing and `persist` overwrites the same row. A message in the DLQ needs a human or a job to look at it: there is no automatic reprocessing yet.
+- A new transaction is visible right after the 202, as `PENDING`. Nothing moves it past `PENDING` yet (executing the payment is the next step), and there is no state machine, so nothing stops an invalid status change.
+- There is no idempotency key from the client: a client that retries a `POST` after a timeout creates a second transaction.
+- Delivery of the change events is at-least-once, so a consumer must tolerate seeing the same change twice. A message in the DLQ needs a human or a job to look at it: there is no automatic reprocessing yet.
 - Paging is offset-based (`page` and `size`, size capped by `app.pagination.max-page-size`).
 - Identifiers are random UUIDs generated by the service.

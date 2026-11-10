@@ -1,9 +1,9 @@
 package com.event.producer.application.transaction;
 
 import com.event.producer.application.shared.NotFoundException;
-import com.event.producer.application.shared.PublishFailedException;
 import com.event.producer.domain.shared.DomainValidationException;
 import com.event.producer.domain.transaction.Transaction;
+import com.event.producer.domain.transaction.TransactionStatus;
 import com.event.producer.domain.transaction.TransactionType;
 import org.junit.jupiter.api.Test;
 
@@ -23,50 +23,23 @@ class TransactionServiceTest {
     private static final BigDecimal TEN = new BigDecimal("10.00");
 
     private final InMemoryTransactionRepository repository = new InMemoryTransactionRepository();
-    private final RecordingTransactionEventPublisher publisher = new RecordingTransactionEventPublisher();
-    private final TransactionService service = new TransactionService(repository, publisher);
+    private final TransactionService service = new TransactionService(repository);
 
-    /** Simulates the full asynchronous flow: request the creation, then the consumer persists the event. */
-    private Transaction createAndPersist(String accountId, TransactionType type, BigDecimal amount, Instant occurredAt) {
-        Transaction requested = service.requestCreation(accountId, type, amount, occurredAt);
-        return service.persist(requested);
+    @Test
+    void createStoresAPendingTransaction() {
+        Transaction created = service.create("acc-1", TransactionType.DEPOSIT, TEN, T1);
+
+        assertEquals(TransactionStatus.PENDING, created.status());
+        assertEquals(created, service.get(created.id()));
     }
 
     @Test
-    void requestCreationPublishesTheEventButDoesNotWriteToTheDatabase() {
-        Transaction requested = service.requestCreation("acc-1", TransactionType.DEPOSIT, TEN, T1);
-
-        assertEquals(List.of(requested), publisher.published);
-        assertThrows(NotFoundException.class, () -> service.get(requested.id()));
-    }
-
-    @Test
-    void requestCreationRejectsInvalidDataBeforePublishing() {
+    void createRejectsInvalidDataAndStoresNothing() {
+        assertThrows(DomainValidationException.class, () -> service.create(" ", TransactionType.DEPOSIT, TEN, T1));
         assertThrows(DomainValidationException.class,
-                () -> service.requestCreation(" ", TransactionType.DEPOSIT, TEN, T1));
-        assertThrows(DomainValidationException.class,
-                () -> service.requestCreation("acc-1", TransactionType.DEPOSIT, BigDecimal.ZERO, T1));
+                () -> service.create("acc-1", TransactionType.DEPOSIT, BigDecimal.ZERO, T1));
 
-        assertTrue(publisher.published.isEmpty());
-    }
-
-    @Test
-    void requestCreationFailsWhenTheBrokerIsUnavailable() {
-        publisher.failing = true;
-
-        assertThrows(PublishFailedException.class,
-                () -> service.requestCreation("acc-1", TransactionType.DEPOSIT, TEN, T1));
-    }
-
-    @Test
-    void persistWritesTheTransactionAndIsIdempotent() {
-        Transaction requested = service.requestCreation("acc-1", TransactionType.DEPOSIT, TEN, T1);
-
-        service.persist(requested);
-        service.persist(requested); // the same event delivered twice (at-least-once)
-
-        assertEquals(requested, service.get(requested.id()));
-        assertEquals(1, service.list(0, 10).size());
+        assertTrue(service.list(0, 10).isEmpty());
     }
 
     @Test
@@ -75,12 +48,15 @@ class TransactionServiceTest {
     }
 
     @Test
-    void updateReplacesTheData() {
-        Transaction created = createAndPersist("acc-1", TransactionType.DEPOSIT, TEN, T1);
+    void updateReplacesTheDataAndKeepsTheStatus() {
+        Transaction created = service.create("acc-1", TransactionType.DEPOSIT, TEN, T1);
+        repository.save(new Transaction(created.id(), created.accountId(), created.type(), created.amount(),
+                created.occurredAt(), TransactionStatus.COMPLETED));
 
         Transaction updated = service.update(created.id(), "acc-1", TransactionType.WITHDRAWAL, new BigDecimal("25.50"), T2);
 
         assertEquals(TransactionType.WITHDRAWAL, updated.type());
+        assertEquals(TransactionStatus.COMPLETED, updated.status());
         assertEquals(updated, service.get(created.id()));
     }
 
@@ -92,7 +68,7 @@ class TransactionServiceTest {
 
     @Test
     void deleteRemovesTheTransaction() {
-        Transaction created = createAndPersist("acc-1", TransactionType.DEPOSIT, TEN, T1);
+        Transaction created = service.create("acc-1", TransactionType.DEPOSIT, TEN, T1);
 
         service.delete(created.id());
 
@@ -102,8 +78,8 @@ class TransactionServiceTest {
 
     @Test
     void listReturnsMostRecentFirstAndPaginates() {
-        Transaction older = createAndPersist("acc-1", TransactionType.DEPOSIT, TEN, T1);
-        Transaction newer = createAndPersist("acc-1", TransactionType.WITHDRAWAL, TEN, T2);
+        Transaction older = service.create("acc-1", TransactionType.DEPOSIT, TEN, T1);
+        Transaction newer = service.create("acc-1", TransactionType.WITHDRAWAL, TEN, T2);
 
         assertEquals(List.of(newer, older), service.list(0, 10));
         assertEquals(List.of(newer), service.list(0, 1));

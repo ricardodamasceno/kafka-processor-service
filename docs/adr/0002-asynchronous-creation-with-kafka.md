@@ -1,6 +1,6 @@
 # 0002. Asynchronous creation with Kafka
 
-- Status: Accepted
+- Status: Superseded by [0005](0005-pending-transactions-and-cdc-events.md)
 - Date: 2026-11-07
 
 ## Context

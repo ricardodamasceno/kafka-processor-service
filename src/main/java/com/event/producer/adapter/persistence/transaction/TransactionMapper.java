@@ -14,11 +14,11 @@ final class TransactionMapper {
 
     static TransactionJpaEntity toEntity(Transaction transaction) {
         return new TransactionJpaEntity(transaction.id(), transaction.accountId(), transaction.type(),
-                transaction.amount(), transaction.occurredAt());
+                transaction.amount(), transaction.occurredAt(), transaction.status());
     }
 
     static Transaction toDomain(TransactionJpaEntity entity) {
         return new Transaction(entity.getId(), entity.getAccountId(), entity.getType(),
-                entity.getAmount(), entity.getOccurredAt());
+                entity.getAmount(), entity.getOccurredAt(), entity.getStatus());
     }
 }

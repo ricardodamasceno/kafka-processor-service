@@ -1,6 +1,5 @@
 package com.event.producer.config;
 
-import com.event.producer.application.transaction.TransactionEventPublisher;
 import com.event.producer.application.transaction.TransactionService;
 import com.event.producer.domain.transaction.TransactionRepository;
 import org.springframework.context.annotation.Bean;
@@ -17,7 +16,7 @@ import org.springframework.context.annotation.Configuration;
 class ServiceConfig {
 
     @Bean
-    TransactionService transactionService(TransactionRepository repository, TransactionEventPublisher publisher) {
-        return new TransactionService(repository, publisher);
+    TransactionService transactionService(TransactionRepository repository) {
+        return new TransactionService(repository);
     }
 }

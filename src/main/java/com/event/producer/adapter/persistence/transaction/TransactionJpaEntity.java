@@ -1,5 +1,6 @@
 package com.event.producer.adapter.persistence.transaction;
 
+import com.event.producer.domain.transaction.TransactionStatus;
 import com.event.producer.domain.transaction.TransactionType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -42,4 +43,8 @@ public class TransactionJpaEntity {
 
     @Column(name = "occurred_at", nullable = false)
     private Instant occurredAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private TransactionStatus status;
 }

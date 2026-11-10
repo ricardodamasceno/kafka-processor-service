@@ -1,4 +1,5 @@
 # Local environment: Kafka cluster (3 KRaft brokers) + Schema Registry + Kafka UI + topic creation + PostgreSQL
+# + Kafka Connect with Debezium (change data capture of selected tables)
 # Usage (from the project root): docker compose -f docker/docker-compose.yml up -d
 name: events-processor
 
@@ -79,6 +80,9 @@ services:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
       KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      # Lets the UI list and inspect the Debezium connector
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
 
   kafka-init:
     image: apache/kafka:3.9.0
@@ -94,6 +98,8 @@ services:
     image: postgres:17
     container_name: postgres
     restart: unless-stopped
+    # Debezium reads the write-ahead log (WAL), which Postgres only exposes in a readable form with wal_level=logical
+    command: ["postgres", "-c", "wal_level=logical"]
     ports: ["5432:5432"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-events_processor}
@@ -106,6 +112,39 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Kafka Connect with the Debezium plugins already installed. It runs the connector that reads the row changes of
+  # the selected tables from the Postgres WAL and publishes them to Kafka, one topic per table (<table>-cdc-events).
+  # The connector itself is registered with docker/register-connector.sh, after the migrations have been applied.
+  kafka-connect:
+    image: quay.io/debezium/connect:3.7.1.Final
+    container_name: kafka-connect
+    restart: unless-stopped
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+    ports: ["8083:8083"]
+    environment:
+      BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      GROUP_ID: events-processor-connect
+      # Internal topics where Connect keeps its own state. The offsets topic records how far the WAL was read.
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-statuses
+      # The image only maps the topic names above. Anything else needs the CONNECT_ prefix, which the image turns
+      # into a worker property. Replication factor 3 matches the cluster (min.insync.replicas=2); one partition is
+      # enough for one connector (Connect would create 25 for offsets and 5 for statuses by default).
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_OFFSET_STORAGE_PARTITIONS: 1
+      CONNECT_STATUS_STORAGE_PARTITIONS: 1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
 volumes:
   postgres-data:

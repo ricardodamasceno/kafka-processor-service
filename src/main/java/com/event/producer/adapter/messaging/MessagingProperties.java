@@ -11,12 +11,11 @@ import java.time.Duration;
 
 /**
  * Messaging settings read from {@code application.yml} (prefix {@code app.messaging}):
- * topic names, how long to wait for the broker acknowledgement, and the consumer retry policy.
+ * topic names and the consumer retry policy.
  */
 @Validated
 @ConfigurationProperties(prefix = "app.messaging")
 public record MessagingProperties(
-        @NotNull Duration sendTimeout,
         @NotNull @Valid Retry retry,
         @NotNull @Valid Topics topics) {
 
@@ -26,7 +25,7 @@ public record MessagingProperties(
 
     /** Topic names. Each source topic has a dead letter queue (DLQ) for messages that cannot be processed. */
     public record Topics(
-            @NotBlank String transactions,
-            @NotBlank String transactionsDlq) {
+            @NotBlank String transactionsCdcEvents,
+            @NotBlank String transactionsCdcEventsDlq) {
     }
 }

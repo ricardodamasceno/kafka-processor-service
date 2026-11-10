@@ -3,6 +3,7 @@ package com.event.producer.application.transaction;
 import com.event.producer.application.shared.NotFoundException;
 import com.event.producer.domain.transaction.Transaction;
 import com.event.producer.domain.transaction.TransactionRepository;
+import com.event.producer.domain.transaction.TransactionStatus;
 import com.event.producer.domain.transaction.TransactionType;
 import lombok.RequiredArgsConstructor;
 
@@ -14,34 +15,22 @@ import java.util.UUID;
 /**
  * Application service for transactions: orchestrates the transaction operations using the domain ports.
  * <p>
- * Creation is asynchronous: {@link #requestCreation} validates and publishes an event, and
- * {@link #persist} (called by the event consumer) writes the transaction to the database.
+ * A transaction is created as {@code PENDING}. What happens next is driven by the changes of the
+ * {@code transactions} table, which Debezium publishes to Kafka: this service never calls Kafka.
  * No Spring annotations; it is wired in {@code config.ServiceConfig}.
  */
 @RequiredArgsConstructor
 public class TransactionService {
 
     private final TransactionRepository repository;
-    private final TransactionEventPublisher publisher;
 
     /**
      * Validates the data (the {@link Transaction} constructor enforces the domain rules), assigns an id
-     * and publishes the creation event. Nothing is written to the database here.
-     *
-     * @return the transaction that was accepted; it will exist in the database once the consumer processes the event
+     * and saves the transaction as {@code PENDING}.
      */
-    public Transaction requestCreation(String accountId, TransactionType type, BigDecimal amount, Instant occurredAt) {
-        Transaction transaction = new Transaction(UUID.randomUUID(), accountId, type, amount, occurredAt);
-        publisher.publishCreationRequested(transaction);
-        return transaction;
-    }
-
-    /**
-     * Writes a transaction to the database. Called by the event consumer. Idempotent: the id comes with
-     * the event, so processing the same event twice (at-least-once delivery) leaves a single row.
-     */
-    public Transaction persist(Transaction transaction) {
-        return repository.save(transaction);
+    public Transaction create(String accountId, TransactionType type, BigDecimal amount, Instant occurredAt) {
+        return repository.save(
+                new Transaction(UUID.randomUUID(), accountId, type, amount, occurredAt, TransactionStatus.PENDING));
     }
 
     public Transaction get(UUID id) {
@@ -53,11 +42,10 @@ public class TransactionService {
         return repository.findAll(page, size);
     }
 
+    /** Replaces the data of a transaction. The status is not part of the request, so it is kept. */
     public Transaction update(UUID id, String accountId, TransactionType type, BigDecimal amount, Instant occurredAt) {
-        if (!repository.existsById(id)) {
-            throw notFound(id);
-        }
-        return repository.save(new Transaction(id, accountId, type, amount, occurredAt));
+        Transaction existing = get(id);
+        return repository.save(new Transaction(id, accountId, type, amount, occurredAt, existing.status()));
     }
 
     public void delete(UUID id) {

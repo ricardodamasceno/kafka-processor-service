@@ -13,13 +13,15 @@ import java.util.UUID;
  * Domain entity: an immutable record. Money uses {@link BigDecimal} (never double), and the
  * amount is always positive: the direction of the movement comes from {@link TransactionType}.
  * Null checks come from Lombok's {@code @NonNull}; the business rules stay in the constructor.
+ * The {@link TransactionStatus} says where the transaction is in its life.
  */
 public record Transaction(
         @NonNull UUID id,
         @NonNull String accountId,
         @NonNull TransactionType type,
         @NonNull BigDecimal amount,
-        @NonNull Instant occurredAt) {
+        @NonNull Instant occurredAt,
+        @NonNull TransactionStatus status) {
 
     public Transaction {
         if (accountId.isBlank()) {

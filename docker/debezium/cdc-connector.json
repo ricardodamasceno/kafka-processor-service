@@ -1,0 +1,30 @@
+{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+
+  "database.hostname": "postgres",
+  "database.port": "5432",
+  "database.user": "events",
+  "database.password": "events",
+  "database.dbname": "events_processor",
+  "topic.prefix": "events-processor",
+
+  "plugin.name": "pgoutput",
+  "slot.name": "cdc_slot",
+  "publication.name": "cdc_publication",
+  "publication.autocreate.mode": "filtered",
+  "table.include.list": "public.transactions",
+
+  "snapshot.mode": "no_data",
+  "tombstones.on.delete": "false",
+  "decimal.handling.mode": "string",
+
+  "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "key.converter.schemas.enable": "false",
+  "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "value.converter.schemas.enable": "false",
+
+  "transforms": "route",
+  "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+  "transforms.route.regex": "[^.]+\\.[^.]+\\.(.+)",
+  "transforms.route.replacement": "$1-cdc-events"
+}

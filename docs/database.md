@@ -11,6 +11,7 @@ Defined in `docker/docker-compose.yml`, service `postgres`.
 | Database | `events_processor` |
 | User / password | `events` / `events` |
 | Data | named volume `postgres-data` (survives `down`, removed by `down -v`) |
+| Server setting | `wal_level=logical`, set in the Compose `command`. Debezium reads the write-ahead log (see [debezium.md](debezium.md)) |
 
 The values can be changed with the `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` variables when starting Compose. Credentials are for local use only.
 
@@ -86,9 +87,11 @@ Then start the database again and run `flywayMigrate`.
 
 | Version | File | Creates |
 |---|---|---|
-| V1 | `V1__add_click.sql` | Table `clicks` (id, ad_id, user_id, clicked_at) and an index on `(ad_id, clicked_at)`. Removed again by V3 |
+| V1 | `V1__add_click.sql` | Table `clicks` (id, ad_id, user_id, clicked_at) and an index on `(ad_id, clicked_at)`. Removed again by V4 |
 | V2 | `V2__add_transaction.sql` | Table `transactions` (id, account_id, type, amount, occurred_at), checks on `type` and `amount > 0`, and an index on `(account_id, occurred_at)` |
-| V3 | `V3__drop_click.sql` | Drops the `clicks` table (clicks are no longer part of the service). V1 stays in the history because an applied migration is never edited |
+| V4 | `V4__drop_click.sql` | Drops the `clicks` table (clicks are no longer part of the service). V1 stays in the history because an applied migration is never edited |
+| V5 | `V5__enable_cdc_for_transactions.sql` | Sets `REPLICA IDENTITY FULL` on `transactions`, so the change events published by Debezium carry the complete old row. See [debezium.md](debezium.md) |
+| V6 | `V6__add_transaction_status.sql` | Adds `status` to `transactions` (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`). Existing rows become `COMPLETED`, and the default is dropped afterwards so every insert states its status |
 
 Timestamps use `TIMESTAMPTZ` and money uses `NUMERIC(19, 2)`.
 
