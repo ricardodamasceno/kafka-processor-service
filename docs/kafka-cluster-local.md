@@ -71,12 +71,9 @@ Defined in the `TOPICS` variable of `docker/create-topics.sh`, in the format `na
 
 | Topic | Partitions | Replication | Planned use |
 |---|---|---|---|
-| `payments.transfers` | 6 | 3 | Transaction creation events (consumed by `transaction-persister`) |
-| `payments.transfers.dlq` | 3 | 3 | Messages that failed after retries (dead letter queue) |
+| `payments.transactions` | 6 | 3 | Transaction creation events (consumed by `transaction-persister`) |
+| `payments.transactions.dlq` | 3 | 3 | Messages that failed after retries (dead letter queue) |
 | `ledger.events` | 6 | 3 | Immutable ledger events |
-| `ad.clicks` | 6 | 3 | Click creation events (consumed by `click-persister`) and raw clicks for aggregation |
-| `ad.clicks.dlq` | 3 | 3 | Click messages that could not be processed (dead letter queue) |
-| `ad.clicks.aggregated` | 3 | 3 | Counts per window |
 
 To add a topic, add a line to `TOPICS` and run again:
 
@@ -104,7 +101,7 @@ docker compose -f docker/docker-compose.yml start kafka-2
 See leaders and ISR (in-sync replicas) of a topic:
 
 ```bash
-docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic payments.transfers
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic payments.transactions
 ```
 
 With 1 broker stopped, `acks=all` writes keep working (2 replicas in sync). With 2 stopped, they fail with `NotEnoughReplicas`, and the KRaft quorum also loses its majority. A step-by-step guide is in [kafka-experiments.md](kafka-experiments.md).

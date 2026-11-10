@@ -18,7 +18,7 @@ import java.util.UUID;
 
 /**
  * Database representation of a transaction (table {@code transactions}).
- * Not the domain entity: see {@code ClickJpaEntity} for the reasoning.
+ * Not the domain entity: it only exists to map the table, so the domain {@code Transaction} stays free of persistence annotations.
  */
 @Entity
 @Table(name = "transactions")

@@ -9,7 +9,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Consumes transaction events and writes the transactions to the database.
- * Delivery is at-least-once and {@code TransactionService.persist} is idempotent: see {@code ClickKafkaConsumer}.
+ * Delivery is at-least-once (a message can arrive twice, for example after a crash before the offset is committed),
+ * so {@code TransactionService.persist} is idempotent: saving the same id twice overwrites the same row.
  */
 @Slf4j
 @Component

@@ -1,11 +1,13 @@
-package com.event.producer.application.click;
+package com.event.producer.application.transaction;
 
 import com.event.producer.application.shared.NotFoundException;
 import com.event.producer.application.shared.PublishFailedException;
-import com.event.producer.domain.click.Click;
 import com.event.producer.domain.shared.DomainValidationException;
+import com.event.producer.domain.transaction.Transaction;
+import com.event.producer.domain.transaction.TransactionType;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -14,24 +16,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class ClickServiceTest {
+class TransactionServiceTest {
 
     private static final Instant T1 = Instant.parse("2026-11-07T10:00:00Z");
     private static final Instant T2 = Instant.parse("2026-11-07T11:00:00Z");
+    private static final BigDecimal TEN = new BigDecimal("10.00");
 
-    private final InMemoryClickRepository repository = new InMemoryClickRepository();
-    private final RecordingClickEventPublisher publisher = new RecordingClickEventPublisher();
-    private final ClickService service = new ClickService(repository, publisher);
+    private final InMemoryTransactionRepository repository = new InMemoryTransactionRepository();
+    private final RecordingTransactionEventPublisher publisher = new RecordingTransactionEventPublisher();
+    private final TransactionService service = new TransactionService(repository, publisher);
 
     /** Simulates the full asynchronous flow: request the creation, then the consumer persists the event. */
-    private Click createAndPersist(String adId, String userId, Instant clickedAt) {
-        Click requested = service.requestCreation(adId, userId, clickedAt);
+    private Transaction createAndPersist(String accountId, TransactionType type, BigDecimal amount, Instant occurredAt) {
+        Transaction requested = service.requestCreation(accountId, type, amount, occurredAt);
         return service.persist(requested);
     }
 
     @Test
     void requestCreationPublishesTheEventButDoesNotWriteToTheDatabase() {
-        Click requested = service.requestCreation("ad-1", "user-1", T1);
+        Transaction requested = service.requestCreation("acc-1", TransactionType.DEPOSIT, TEN, T1);
 
         assertEquals(List.of(requested), publisher.published);
         assertThrows(NotFoundException.class, () -> service.get(requested.id()));
@@ -39,7 +42,10 @@ class ClickServiceTest {
 
     @Test
     void requestCreationRejectsInvalidDataBeforePublishing() {
-        assertThrows(DomainValidationException.class, () -> service.requestCreation(" ", "user-1", T1));
+        assertThrows(DomainValidationException.class,
+                () -> service.requestCreation(" ", TransactionType.DEPOSIT, TEN, T1));
+        assertThrows(DomainValidationException.class,
+                () -> service.requestCreation("acc-1", TransactionType.DEPOSIT, BigDecimal.ZERO, T1));
 
         assertTrue(publisher.published.isEmpty());
     }
@@ -48,12 +54,13 @@ class ClickServiceTest {
     void requestCreationFailsWhenTheBrokerIsUnavailable() {
         publisher.failing = true;
 
-        assertThrows(PublishFailedException.class, () -> service.requestCreation("ad-1", "user-1", T1));
+        assertThrows(PublishFailedException.class,
+                () -> service.requestCreation("acc-1", TransactionType.DEPOSIT, TEN, T1));
     }
 
     @Test
-    void persistWritesTheClickAndIsIdempotent() {
-        Click requested = service.requestCreation("ad-1", "user-1", T1);
+    void persistWritesTheTransactionAndIsIdempotent() {
+        Transaction requested = service.requestCreation("acc-1", TransactionType.DEPOSIT, TEN, T1);
 
         service.persist(requested);
         service.persist(requested); // the same event delivered twice (at-least-once)
@@ -69,22 +76,23 @@ class ClickServiceTest {
 
     @Test
     void updateReplacesTheData() {
-        Click created = createAndPersist("ad-1", "user-1", T1);
+        Transaction created = createAndPersist("acc-1", TransactionType.DEPOSIT, TEN, T1);
 
-        Click updated = service.update(created.id(), "ad-2", "user-1", T2);
+        Transaction updated = service.update(created.id(), "acc-1", TransactionType.WITHDRAWAL, new BigDecimal("25.50"), T2);
 
-        assertEquals("ad-2", updated.adId());
+        assertEquals(TransactionType.WITHDRAWAL, updated.type());
         assertEquals(updated, service.get(created.id()));
     }
 
     @Test
     void updateThrowsNotFoundForUnknownId() {
-        assertThrows(NotFoundException.class, () -> service.update(UUID.randomUUID(), "ad-1", "user-1", T1));
+        assertThrows(NotFoundException.class,
+                () -> service.update(UUID.randomUUID(), "acc-1", TransactionType.DEPOSIT, TEN, T1));
     }
 
     @Test
-    void deleteRemovesTheClick() {
-        Click created = createAndPersist("ad-1", "user-1", T1);
+    void deleteRemovesTheTransaction() {
+        Transaction created = createAndPersist("acc-1", TransactionType.DEPOSIT, TEN, T1);
 
         service.delete(created.id());
 
@@ -94,8 +102,8 @@ class ClickServiceTest {
 
     @Test
     void listReturnsMostRecentFirstAndPaginates() {
-        Click older = createAndPersist("ad-1", "user-1", T1);
-        Click newer = createAndPersist("ad-1", "user-2", T2);
+        Transaction older = createAndPersist("acc-1", TransactionType.DEPOSIT, TEN, T1);
+        Transaction newer = createAndPersist("acc-1", TransactionType.WITHDRAWAL, TEN, T2);
 
         assertEquals(List.of(newer, older), service.list(0, 10));
         assertEquals(List.of(newer), service.list(0, 1));

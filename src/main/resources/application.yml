@@ -46,7 +46,5 @@ app:
       max-retries: 3
       interval: 1s
     topics:
-      clicks: ad.clicks
-      clicks-dlq: ad.clicks.dlq
-      transactions: payments.transfers
-      transactions-dlq: payments.transfers.dlq
+      transactions: payments.transactions
+      transactions-dlq: payments.transactions.dlq

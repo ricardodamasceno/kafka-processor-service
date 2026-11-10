@@ -26,8 +26,6 @@ public record MessagingProperties(
 
     /** Topic names. Each source topic has a dead letter queue (DLQ) for messages that cannot be processed. */
     public record Topics(
-            @NotBlank String clicks,
-            @NotBlank String clicksDlq,
             @NotBlank String transactions,
             @NotBlank String transactionsDlq) {
     }

@@ -28,11 +28,9 @@ What lives here: the entities and the rules that are always true, plus the **por
 
 | Class | Role |
 |---|---|
-| `domain.click.Click` | Entity: an immutable record that validates itself in the constructor |
-| `domain.click.ClickRepository` | Port: the contract for storing clicks. Defined here, implemented elsewhere |
-| `domain.transaction.Transaction` | Entity: money is `BigDecimal`, amount is always positive with at most 2 decimals |
+| `domain.transaction.Transaction` | Entity: an immutable record that validates itself in the constructor. Money is `BigDecimal`, amount is always positive with at most 2 decimals |
 | `domain.transaction.TransactionType` | Enum: `DEPOSIT`, `WITHDRAWAL` |
-| `domain.transaction.TransactionRepository` | Port for storing transactions |
+| `domain.transaction.TransactionRepository` | Port: the contract for storing transactions. Defined here, implemented elsewhere |
 | `domain.shared.DomainValidationException` | Thrown when a domain rule is violated |
 
 Why: if a rule such as "an amount must be positive" lives in the entity, it is enforced no matter who creates a `Transaction` (an HTTP call, a Kafka consumer, a test).
@@ -43,9 +41,8 @@ What lives here: the operations the system supports. Each service orchestrates d
 
 | Class | Role |
 |---|---|
-| `application.click.ClickService` | `requestCreation`, `persist`, `get`, `list`, `update`, `delete` for clicks |
-| `application.transaction.TransactionService` | The same operations for transactions |
-| `application.click.ClickEventPublisher`, `application.transaction.TransactionEventPublisher` | Outbound ports: how the application announces events. Implemented by the Kafka adapter |
+| `application.transaction.TransactionService` | `requestCreation`, `persist`, `get`, `list`, `update`, `delete` for transactions |
+| `application.transaction.TransactionEventPublisher` | Outbound port: how the application announces events. Implemented by the Kafka adapter |
 | `application.shared.NotFoundException` | Thrown when a resource does not exist |
 | `application.shared.PublishFailedException` | Thrown when an event could not be published |
 
@@ -63,9 +60,9 @@ Adapters convert data between the format the inner layers use and the format an 
 
 | Class | Role |
 |---|---|
-| `ClickController`, `TransactionController` | Receive HTTP, call a service, return HTTP. No business rule |
-| `ClickRequest`, `TransactionRequest` | Input DTOs (data transfer objects) with Bean Validation (`@NotBlank`, `@Positive`...) |
-| `ClickResponse`, `TransactionResponse` | Output DTOs |
+| `TransactionController` | Receives HTTP, calls a service, returns HTTP. No business rule |
+| `TransactionRequest` | Input DTO (data transfer object) with Bean Validation (`@NotBlank`, `@Positive`...) |
+| `TransactionResponse` | Output DTO |
 | `ApiExceptionHandler` | Maps `NotFoundException` to 404, `DomainValidationException` to 400 and `PublishFailedException` to 503 |
 
 DTOs are separate from domain entities so the API contract and the domain model can change independently.
@@ -74,29 +71,29 @@ DTOs are separate from domain entities so the API contract and the domain model 
 
 | Class | Role |
 |---|---|
-| `ClickJpaEntity`, `TransactionJpaEntity` | JPA classes that map to the tables. They are **not** the domain entities |
-| `ClickJpaRepository`, `TransactionJpaRepository` | Spring Data interfaces (Spring generates the SQL access) |
-| `ClickRepositoryAdapter`, `TransactionRepositoryAdapter` | Implement the domain ports and delegate to Spring Data; they do the persistence only |
-| `ClickMapper`, `TransactionMapper` | Convert between domain entity and JPA entity (`toEntity` / `toDomain`). Their only responsibility is this translation. They are stateless utility classes with static methods, not Spring beans |
+| `TransactionJpaEntity` | JPA class that maps to the table. It is **not** the domain entity |
+| `TransactionJpaRepository` | Spring Data interface (Spring generates the SQL access) |
+| `TransactionRepositoryAdapter` | Implements the domain port and delegates to Spring Data; it does the persistence only |
+| `TransactionMapper` | Converts between domain entity and JPA entity (`toEntity` / `toDomain`). Its only responsibility is this translation. It is a stateless utility class with static methods, not a Spring bean |
 
 Why two entity classes: JPA needs a no-arg constructor, annotations and a mutable shape. Keeping that out of the domain keeps the domain pure. The cost is the mapping step, which lives in the mapper classes so it can be tested on its own.
 
-Why `ClickJpaRepository` needs no `@Repository`: it is only an interface. Spring Data JPA scans for interfaces that extend `JpaRepository` and creates the implementation at runtime (a proxy backed by `SimpleJpaRepository`, which uses the JPA `EntityManager` and Hibernate).
+Why `TransactionJpaRepository` needs no `@Repository`: it is only an interface. Spring Data JPA scans for interfaces that extend `JpaRepository` and creates the implementation at runtime (a proxy backed by `SimpleJpaRepository`, which uses the JPA `EntityManager` and Hibernate).
 
 **`adapter.messaging`** (Kafka: both driving and driven)
 
 | Class | Role |
 |---|---|
-| `ClickKafkaPublisher`, `TransactionKafkaPublisher` | Implement the event publisher ports (the **producers**). Key = entity id |
-| `ClickKafkaConsumer`, `TransactionKafkaConsumer` | `@KafkaListener` classes (the **consumers**). Read the JSON, rebuild the domain object and call `persist` |
-| `ClickMessage`, `TransactionMessage` | The JSON shape on the topic: the contract between producer and consumer, separate from the domain classes |
-| `ClickMessageMapper`, `TransactionMessageMapper` | Static converters between domain and message |
+| `TransactionKafkaPublisher` | Implements the event publisher port (the **producer**). Key = entity id |
+| `TransactionKafkaConsumer` | `@KafkaListener` class (the **consumer**). Reads the JSON, rebuilds the domain object and calls `persist` |
+| `TransactionMessage` | The JSON shape on the topic: the contract between producer and consumer, separate from the domain class |
+| `TransactionMessageMapper` | Static converter between domain and message |
 | `KafkaMessageSender` | Sends a message and waits for the broker acknowledgement (`acks=all`) |
 | `JsonMessageCodec` | Converts messages to and from JSON text. Messages are plain JSON strings on the topic |
 | `KafkaErrorHandlingConfig` | Retries a failed message, then sends it to the dead letter queue (DLQ). Bad payloads and broken domain rules skip the retries |
 | `MessagingProperties` | Topic names, send timeout and retry policy, read from `application.yml` |
 
-Consumer groups: `click-persister` and `transaction-persister`. All instances of the application in a group share the partitions.
+Consumer group: `transaction-persister`. All instances of the application in a group share the partitions.
 
 ### `config`: frameworks and wiring
 
@@ -104,17 +101,17 @@ Consumer groups: `click-persister` and `transaction-persister`. All instances of
 
 ## How a request flows
 
-`POST /clicks` (asynchronous creation):
+`POST /transactions` (asynchronous creation):
 
-1. `ClickController` receives the JSON as a `ClickRequest` and validates its format.
-2. It calls `ClickService.requestCreation(adId, userId, clickedAt)`.
-3. The service creates a `Click` (the domain validates its rules and an id is generated) and calls `ClickEventPublisher`.
-4. `ClickKafkaPublisher` serializes a `ClickMessage` and sends it to the `ad.clicks` topic with the id as key. It waits for the broker acknowledgement.
+1. `TransactionController` receives the JSON as a `TransactionRequest` and validates its format.
+2. It calls `TransactionService.requestCreation(accountId, type, amount, occurredAt)`.
+3. The service creates a `Transaction` (the domain validates its rules and an id is generated) and calls `TransactionEventPublisher`.
+4. `TransactionKafkaPublisher` serializes a `TransactionMessage` and sends it to the `payments.transactions` topic with the id as key. It waits for the broker acknowledgement.
 5. The API answers **202 Accepted** with an empty body (no id and no `Location` header). Nothing is in the database yet.
-6. Later, `ClickKafkaConsumer` reads the message, rebuilds the `Click` and calls `ClickService.persist`.
-7. `ClickRepositoryAdapter` converts the `Click` to a `ClickJpaEntity` and saves it. From now on `GET /clicks/{id}` returns 200 (before that it returns 404). Since the response does not carry the id, a client finds the record with `GET /clicks` (most recent first).
+6. Later, `TransactionKafkaConsumer` reads the message, rebuilds the `Transaction` and calls `TransactionService.persist`.
+7. `TransactionRepositoryAdapter` converts the `Transaction` to a `TransactionJpaEntity` and saves it. From now on `GET /transactions/{id}` returns 200 (before that it returns 404). Since the response does not carry the id, a client finds the record with `GET /transactions` (most recent first).
 
-Transactions follow the same path through `payments.transfers`. `GET`, `PUT` and `DELETE` are still synchronous and go straight to the database.
+`GET`, `PUT` and `DELETE` are still synchronous and go straight to the database.
 
 ## Lombok
 
@@ -145,15 +142,15 @@ The pagination limits come from `application.yml` instead of being hard-coded in
 | `app.pagination.default-page-size` | Page size used when the request does not send `size` |
 | `app.pagination.max-page-size` | Upper bound for `size` |
 
-The values are bound to the `PaginationProperties` record (`@ConfigurationProperties`), which also keeps the clamping logic in one place instead of duplicating it in each controller. The controller base paths (`/clicks`, `/transactions`) are written directly in `@RequestMapping`.
+The values are bound to the `PaginationProperties` record (`@ConfigurationProperties`), which also keeps the clamping logic in one place instead of duplicating it in each controller. The controller base path (`/transactions`) is written directly in `@RequestMapping`.
 The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.max-retries`, `retry.interval`, `topics.*`), bound to `MessagingProperties`. The connection settings (`bootstrap-servers`, `acks=all`, idempotent producer, `auto-offset-reset: earliest`, manual commit per record) are under `spring.kafka`.
 
 ## Testing strategy
 
-- **Domain tests** (`ClickTest`, `TransactionTest`): pure Java, no Spring, no database.
-- **Mapper tests** (`ClickMapperTest`, `TransactionMapperTest`): check that the conversion in both directions loses nothing.
-- **Service tests** (`ClickServiceTest`): use `InMemoryClickRepository` and `RecordingClickEventPublisher`, test doubles that implement the ports. This works because services depend on the interfaces, not on JPA or Kafka. They cover: the event is published but nothing is written, invalid data is rejected before publishing, a broker failure surfaces, and `persist` is idempotent.
-- **Message contract tests** (`JsonMessageCodecTest`): JSON round trip of both messages, and rejection of malformed payloads.
+- **Domain tests** (`TransactionTest`): pure Java, no Spring, no database.
+- **Mapper tests** (`TransactionMapperTest`): check that the conversion in both directions loses nothing.
+- **Service tests** (`TransactionServiceTest`): use `InMemoryTransactionRepository` and `RecordingTransactionEventPublisher`, test doubles that implement the ports. This works because services depend on the interfaces, not on JPA or Kafka. They cover: the event is published but nothing is written, invalid data is rejected before publishing, a broker failure surfaces, and `persist` is idempotent.
+- **Message contract tests** (`JsonMessageCodecTest`): JSON round trip of the transaction message, and rejection of malformed payloads.
 - The asynchronous flow was checked end to end against the Docker Kafka and Postgres: create, consume, read, a duplicated event (one row), and bad payloads (sent to the DLQ). There are no automated integration tests yet.
 
 ## Trade-offs and known limitations

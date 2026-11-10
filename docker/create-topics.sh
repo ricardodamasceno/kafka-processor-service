@@ -7,12 +7,9 @@ KAFKA_TOPICS="/opt/kafka/bin/kafka-topics.sh"
 
 # name:partitions:replication
 TOPICS="
-payments.transfers:6:3
-payments.transfers.dlq:3:3
+payments.transactions:6:3
+payments.transactions.dlq:3:3
 ledger.events:6:3
-ad.clicks:6:3
-ad.clicks.dlq:3:3
-ad.clicks.aggregated:3:3
 "
 
 for entry in $TOPICS; do

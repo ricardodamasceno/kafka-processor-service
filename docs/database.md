@@ -86,8 +86,9 @@ Then start the database again and run `flywayMigrate`.
 
 | Version | File | Creates |
 |---|---|---|
-| V1 | `V1__add_click.sql` | Table `clicks` (id, ad_id, user_id, clicked_at) and an index on `(ad_id, clicked_at)` |
+| V1 | `V1__add_click.sql` | Table `clicks` (id, ad_id, user_id, clicked_at) and an index on `(ad_id, clicked_at)`. Removed again by V3 |
 | V2 | `V2__add_transaction.sql` | Table `transactions` (id, account_id, type, amount, occurred_at), checks on `type` and `amount > 0`, and an index on `(account_id, occurred_at)` |
+| V3 | `V3__drop_click.sql` | Drops the `clicks` table (clicks are no longer part of the service). V1 stays in the history because an applied migration is never edited |
 
 Timestamps use `TIMESTAMPTZ` and money uses `NUMERIC(19, 2)`.
 
