@@ -1,6 +1,6 @@
 package com.event.producer.adapter.messaging;
 
-import com.event.producer.adapter.messaging.transaction.TransactionChangeMessage;
+import com.event.producer.adapter.messaging.cdc.TransactionChangeMessage;
 import com.event.producer.domain.transaction.TransactionStatus;
 import com.event.producer.domain.transaction.TransactionType;
 import org.junit.jupiter.api.Test;

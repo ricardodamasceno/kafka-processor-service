@@ -9,6 +9,10 @@ KAFKA_TOPICS="/opt/kafka/bin/kafka-topics.sh"
 TOPICS="
 transactions-cdc-events:6:3
 transactions-cdc-events-dlq:3:3
+payments-transactions-create:6:3
+payments-transactions-create-dlq:3:3
+payments-transactions-update:6:3
+payments-transactions-update-dlq:3:3
 "
 
 for entry in $TOPICS; do

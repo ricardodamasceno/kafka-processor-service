@@ -1,4 +1,4 @@
-package com.event.producer.adapter.messaging.transaction;
+package com.event.producer.adapter.messaging.cdc;
 
 import com.event.producer.domain.transaction.TransactionStatus;
 import com.event.producer.domain.transaction.TransactionType;
@@ -14,6 +14,7 @@ import java.util.UUID;
  * <p>
  * Only the fields this service reads are mapped; the rest of the envelope (source, timestamps) is ignored.
  * The row fields keep the column names of the table, so the table schema is the contract of the topic.
+ * Nothing outside this package should know this format: the translator turns it into transaction events.
  *
  * @param op     the operation: {@code c} (insert), {@code u} (update) or {@code d} (delete)
  * @param before the row before the change: {@code null} for an insert

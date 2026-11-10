@@ -39,6 +39,8 @@ app:
     default-page-size: 20
     max-page-size: 100
   messaging:
+    # How long to wait for Kafka to acknowledge an event before the publication counts as failed
+    send-timeout: 5s
     # Consumer retry policy before a message goes to the dead letter queue
     retry:
       max-retries: 3
@@ -47,3 +49,6 @@ app:
       # Row changes of the transactions table, published by Debezium (see docs/debezium.md)
       transactions-cdc-events: transactions-cdc-events
       transactions-cdc-events-dlq: transactions-cdc-events-dlq
+      # Transaction events published by the translator: the work to do (create) and what happened (update)
+      transactions-create: payments-transactions-create
+      transactions-update: payments-transactions-update

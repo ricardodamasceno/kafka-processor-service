@@ -6,7 +6,7 @@ Debezium reads the row changes of selected tables from the PostgreSQL write-ahea
 
 The infrastructure is ready: PostgreSQL with logical decoding, Kafka Connect with Debezium, the connector configuration, and the `transactions-cdc-events` topic. The `transactions` table is the only table captured, and migration V1 sets `REPLICA IDENTITY FULL` on it (it takes effect when the migration is applied).
 
-**The application uses it** (see [ADR 0005](adr/0005-pending-transactions-and-cdc-events.md)). `POST /transactions` saves the transaction as `PENDING` (the `status` column is part of migration V1) and does not call Kafka. Debezium publishes the change to `transactions-cdc-events`, and `TransactionChangeConsumer` reads it. For now the consumer only logs each change. The next step is a reaction: an executor that picks up the `PENDING` insert and moves the transaction on, and a notifier for the final state.
+**The application uses it** (see [ADR 0005](adr/0005-pending-transactions-and-cdc-events.md)). `POST /transactions` saves the transaction as `PENDING` (the `status` column is part of migration V1) and does not call Kafka. Debezium publishes the change to `transactions-cdc-events`, and a translator reads it. The translator is the **only** reader of that topic: it turns each change into a transaction event and publishes it to `payments-transactions-create` or `payments-transactions-update` ([ADR 0006](adr/0006-translate-changes-into-transaction-events.md)). Every other consumer reads those events and never sees `before` and `after`. All the code that knows Debezium's format is in the package `adapter.messaging.cdc`. The next step is the reactions: an executor that picks up the created transactions and moves them on, and a notifier for the final state.
 
 ## Convention
 
@@ -153,7 +153,7 @@ docker exec postgres psql -U events -d events_processor -c "SELECT pg_drop_repli
 ## Known limitations
 
 - The database schema of a captured table is also the contract of its topic. Renaming or retyping a column changes the messages that consumers read.
-- Consumers get row changes, not business events. The meaning comes from the operation and the data (for example `u` with `before.status = PENDING` and `after.status = COMPLETED`).
+- The topic carries row changes, not business events. The meaning comes from the operation and the data (for example `u` with `before.status = PENDING` and `after.status = COMPLETED`), and only the translator interprets it.
 - The message key is the primary key, so order is kept per row, not per account. Ordering by account would need a key transformation.
 - The credentials in `cdc-connector.json` are the local defaults. For another environment use Kafka Connect's config providers instead of plain text.
 - One Connect worker runs locally. In production Connect runs as a cluster (several workers with the same `GROUP_ID`), so another worker takes over when one fails.

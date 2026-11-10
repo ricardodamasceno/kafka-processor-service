@@ -35,7 +35,7 @@ Alternatives considered:
 - Delivery is at-least-once, so every consumer must tolerate duplicates.
 - The key is the primary key, so ordering is per row. Ordering per account needs a key transformation.
 - The flow of ADR 0002 changes: the API inserts the row itself (with a status) instead of publishing an event for the consumer to insert. This is done in [ADR 0005](0005-pending-transactions-and-cdc-events.md).
-- The topics `payments-transactions-create` and `payments-transactions-update` (and their DLQs) overlapped with `transactions-cdc-events`, so they were removed.
+- The topics `payments-transactions-create` and `payments-transactions-update` (and their DLQs) overlapped with `transactions-cdc-events`, so they were removed. [ADR 0006](0006-translate-changes-into-transaction-events.md) brings them back with a different role, to carry translated transaction events.
 - New components to operate: Kafka Connect and the connector. A stopped connector makes PostgreSQL retain WAL, so the retained size of the replication slot must be monitored.
 - PostgreSQL must run with `wal_level=logical`.
 - There is no outbox table to clean up.

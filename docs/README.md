@@ -17,6 +17,7 @@ Convention: a `docs/` folder at the project root, with architecture decisions re
 - [0003. Outbox with change data capture (Debezium)](adr/0003-outbox-with-debezium-cdc.md) (superseded by 0004)
 - [0004. Change data capture per table with Debezium](adr/0004-cdc-per-table-with-debezium.md)
 - [0005. Create transactions as PENDING and react to their change events](adr/0005-pending-transactions-and-cdc-events.md)
+- [0006. Translate row changes into transaction events](adr/0006-translate-changes-into-transaction-events.md)
 
 ## Rules
 
