@@ -71,10 +71,12 @@ Defined in the `TOPICS` variable of `docker/create-topics.sh`, in the format `na
 
 | Topic | Partitions | Replication | Planned use |
 |---|---|---|---|
-| `payments-transactions` | 6 | 3 | Transaction creation events (consumed by `transaction-persister`) |
-| `payments-transactions-dlq` | 3 | 3 | Messages that failed after retries (dead letter queue) |
+| `payments-transactions-create` | 6 | 3 | Transaction creation events (consumed by `transaction-persister`) |
+| `payments-transactions-create-dlq` | 3 | 3 | Messages from the create topic that failed after retries (dead letter queue) |
+| `payments-transactions-update` | 6 | 3 | Transaction status changes, keyed by transaction id so the statuses of one transaction stay in order. Nothing publishes to it or reads from it yet |
+| `payments-transactions-update-dlq` | 3 | 3 | Messages from the update topic that failed after retries (dead letter queue) |
 
-Topic names use hyphens as the only separator (`<domain>-<entity>`, plus `-dlq` for its dead letter queue).
+Topic names use hyphens as the only separator (`<domain>-<entity>-<action>`, plus `-dlq` for the dead letter queue of a topic).
 
 To add a topic, add a line to `TOPICS` and run again:
 
@@ -102,7 +104,7 @@ docker compose -f docker/docker-compose.yml start kafka-2
 See leaders and ISR (in-sync replicas) of a topic:
 
 ```bash
-docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic payments-transactions
+docker exec kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic '^payments-transactions-create$'
 ```
 
 With 1 broker stopped, `acks=all` writes keep working (2 replicas in sync). With 2 stopped, they fail with `NotEnoughReplicas`, and the KRaft quorum also loses its majority. A step-by-step guide is in [kafka-experiments.md](kafka-experiments.md).
@@ -113,4 +115,4 @@ With 1 broker stopped, `acks=all` writes keep working (2 replicas in sync). With
 - No authentication or TLS (PLAINTEXT), for local use only.
 - The `provectuslabs/kafka-ui:latest` image is not version-pinned.
 - Topic names that mix a dot and an underscore can collide in metrics, and Kafka warns about this when topics are created. The project avoids it by using hyphens as the only separator.
-- In `kafka-topics.sh`, the `--topic` value of `--describe`, `--alter` and `--delete` is a **regular expression**. A dot matches any character, so `--delete --topic payments.transactions` also deletes `payments-transactions`. Anchor the name (`'^payments-transactions$'`) when deleting.
+- In `kafka-topics.sh`, the `--topic` value of `--describe`, `--alter` and `--delete` is a **regular expression**. A dot matches any character, so `--delete --topic a.b` also deletes `a-b`, and an unanchored name also matches longer names that start with it (`payments-transactions-create` would match `payments-transactions-create-dlq`). Anchor the name (`'^payments-transactions-create$'`) when describing or deleting.

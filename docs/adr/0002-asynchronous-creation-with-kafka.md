@@ -11,7 +11,7 @@ Creating transactions was synchronous: the REST endpoint wrote straight to Postg
 
 **Creation flow.** `POST /transactions` validates the request exactly as before (DTO validation plus the domain rules), generate the id, publish an event to Kafka and answer `202 Accepted` with an empty body (the client does not receive the id). A consumer reads the event and writes the record. `GET`, `PUT` and `DELETE` stay synchronous.
 
-- Topics: `payments-transactions` for transactions, with the dead letter queue `payments-transactions-dlq`.
+- Topics: `payments-transactions-create` for the creation events, with the dead letter queue `payments-transactions-create-dlq`.
 - The producer uses `acks=all` (with `min.insync.replicas=2` on the topics) and the idempotent producer. The API waits for the broker acknowledgement and answers `503` if it does not arrive within `app.messaging.send-timeout`, so a `202` means the event is safely stored in Kafka.
 - The message key is the entity id. Events of the same entity go to the same partition and are consumed in order; random UUIDs spread the load evenly.
 - Messages are plain JSON strings (`StringSerializer`), with a message class separate from the domain class.
@@ -19,7 +19,7 @@ Creating transactions was synchronous: the REST endpoint wrote straight to Postg
 - Consumers commit the offset after each message is processed. A failure is retried 3 times, 1 second apart, then the message goes to the DLQ. Malformed payloads and broken domain rules go to the DLQ without retries, because retrying cannot fix them.
 - The domain object is rebuilt on the consumer side, so the domain rules are checked again before anything is written.
 
-**If the whole CRUD becomes asynchronous: one topic per entity, with the action in the message.** Use the `payments-transactions` topic carrying events such as `CREATED`, `UPDATED` and `DELETED` (the type in the payload and in a header), keyed by the entity id. Do not create one topic per action, and do not put every entity in a single topic.
+**If the whole CRUD becomes asynchronous: one topic per entity, with the action in the message.** Use a single topic for the entity (today `payments-transactions-create`) carrying events such as `CREATED`, `UPDATED` and `DELETED` (the type in the payload and in a header), keyed by the entity id. Do not create one topic per action, and do not put every entity in a single topic.
 
 - Kafka orders messages only inside a partition. Create, update and delete of the same entity must be processed in that order, so they have to share a topic and a key. With one topic per action there is no order between topics: an update can be processed before the create it depends on.
 - A single topic for all entities would mix different schemas, retention, scaling and consumers, and every consumer would have to filter what it does not care about.
@@ -36,4 +36,4 @@ Creating transactions was synchronous: the REST endpoint wrote straight to Postg
 
 ## Update (2026-11-10)
 
-The click entity was removed from the service, so only transactions remain. The topic `payments.transfers` was renamed to `payments-transactions` (and its DLQ to `payments-transactions-dlq`) to match the entity name, and topic names now use hyphens as the only separator. The unused `ledger.events` topic was removed. The decision above is unchanged.
+The click entity was removed from the service, so only transactions remain. The topic `payments.transfers` was renamed to `payments-transactions-create` (and its DLQ to `payments-transactions-create-dlq`), topic names now use hyphens as the only separator, and the unused `ledger.events` topic was removed. A second topic, `payments-transactions-update` (with the dead letter queue `payments-transactions-update-dlq`), was added for transaction status changes. It is a separate stream of facts keyed by transaction id, not another topic for the same creation events; nothing publishes to it or reads from it yet. The decision above is unchanged.
