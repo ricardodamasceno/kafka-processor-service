@@ -29,19 +29,19 @@ Quick glossary:
 Create the topic (3 partitions, rf=3):
 
 ```bash
-docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --create --topic lab.keys --partitions 3 --replication-factor 3
+docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --create --topic lab-keys --partitions 3 --replication-factor 3
 ```
 
 Publish 6 messages with keys (format `key:value`):
 
 ```bash
-printf 'account-A:deposit-100\naccount-B:deposit-50\naccount-A:withdraw-30\naccount-C:deposit-70\naccount-A:deposit-50\naccount-B:withdraw-20\n' | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab.keys --property parse.key=true --property key.separator=:
+printf 'account-A:deposit-100\naccount-B:deposit-50\naccount-A:withdraw-30\naccount-C:deposit-70\naccount-A:deposit-50\naccount-B:withdraw-20\n' | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab-keys --property parse.key=true --property key.separator=:
 ```
 
 Read them showing partition, offset and key:
 
 ```bash
-docker exec kafka-1 $K/kafka-console-consumer.sh --bootstrap-server kafka-1:9092 --topic lab.keys --from-beginning --timeout-ms 8000 --property print.key=true --property print.partition=true --property print.offset=true
+docker exec kafka-1 $K/kafka-console-consumer.sh --bootstrap-server kafka-1:9092 --topic lab-keys --from-beginning --timeout-ms 8000 --property print.key=true --property print.partition=true --property print.offset=true
 ```
 
 (The `TimeoutException` at the end is expected: it is `--timeout-ms` ending the read.)
@@ -70,7 +70,7 @@ Use the topic from experiment 1. Read it again with the consumer above and compa
 Open **3 terminals** and, in each one, start a consumer with the same group (one per terminal, one at a time, observing between steps):
 
 ```bash
-docker exec -it kafka-1 $K/kafka-console-consumer.sh --bootstrap-server kafka-1:9092 --topic lab.keys --group g1 --property print.partition=true
+docker exec -it kafka-1 $K/kafka-console-consumer.sh --bootstrap-server kafka-1:9092 --topic lab-keys --group g1 --property print.partition=true
 ```
 
 In a fourth terminal, follow the distribution:
@@ -112,7 +112,7 @@ Start a consumer with `--group g1` and another with `--group g2`, both with `--f
 Check the initial state:
 
 ```bash
-docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic lab.keys
+docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic lab-keys
 ```
 
 Stop a broker (here, `kafka-2`):
@@ -124,7 +124,7 @@ docker compose -f docker/docker-compose.yml stop kafka-2
 Run `--describe` again (wait a few seconds). Publish with `acks=all`:
 
 ```bash
-printf 'account-A:failure-test\n' | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab.keys --producer-property acks=all --property parse.key=true --property key.separator=:
+printf 'account-A:failure-test\n' | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab-keys --producer-property acks=all --property parse.key=true --property key.separator=:
 ```
 
 Start the broker again and watch the ISR recover:
@@ -148,13 +148,13 @@ docker compose -f docker/docker-compose.yml start kafka-2
 Create a topic with `min.insync.replicas=3` (equal to rf), so that **any** broker being down blocks `acks=all` writes. This keeps the KRaft quorum intact (2 of 3 nodes), unlike stopping 2 brokers.
 
 ```bash
-docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --create --topic lab.durability --partitions 1 --replication-factor 3 --config min.insync.replicas=3
+docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --create --topic lab-durability --partitions 1 --replication-factor 3 --config min.insync.replicas=3
 ```
 
 With all 3 brokers up, publish with `acks=all` (should work):
 
 ```bash
-echo "k:ok" | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab.durability --producer-property acks=all --property parse.key=true --property key.separator=:
+echo "k:ok" | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab-durability --producer-property acks=all --property parse.key=true --property key.separator=:
 ```
 
 Stop a broker other than `kafka-1` (which serves the commands):
@@ -166,13 +166,13 @@ docker compose -f docker/docker-compose.yml stop kafka-3
 Check the ISR and try to publish with `acks=all`, then with `acks=1`:
 
 ```bash
-docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic lab.durability
+docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic lab-durability
 ```
 ```bash
-echo "k:failure" | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab.durability --producer-property acks=all --producer-property delivery.timeout.ms=8000 --producer-property request.timeout.ms=4000 --property parse.key=true --property key.separator=:
+echo "k:failure" | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab-durability --producer-property acks=all --producer-property delivery.timeout.ms=8000 --producer-property request.timeout.ms=4000 --property parse.key=true --property key.separator=:
 ```
 ```bash
-echo "k:acks1" | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab.durability --producer-property acks=1 --property parse.key=true --property key.separator=:
+echo "k:acks1" | docker exec -i kafka-1 $K/kafka-console-producer.sh --bootstrap-server kafka-1:9092 --topic lab-durability --producer-property acks=1 --property parse.key=true --property key.separator=:
 ```
 
 Start the broker again:
@@ -195,7 +195,7 @@ docker compose -f docker/docker-compose.yml start kafka-3
 Consume everything with a new group and let it finish:
 
 ```bash
-docker exec kafka-1 $K/kafka-console-consumer.sh --bootstrap-server kafka-1:9092 --topic lab.keys --group g-replay --from-beginning --timeout-ms 8000 --property print.partition=true --property print.offset=true
+docker exec kafka-1 $K/kafka-console-consumer.sh --bootstrap-server kafka-1:9092 --topic lab-keys --group g-replay --from-beginning --timeout-ms 8000 --property print.partition=true --property print.offset=true
 ```
 
 Check the committed offset and the lag (should be 0):
@@ -207,10 +207,10 @@ docker exec kafka-1 $K/kafka-consumer-groups.sh --bootstrap-server kafka-1:9092 
 Simulate the reset (`--dry-run` only shows what it would do), then run it (the group must have no active consumers):
 
 ```bash
-docker exec kafka-1 $K/kafka-consumer-groups.sh --bootstrap-server kafka-1:9092 --group g-replay --topic lab.keys --reset-offsets --to-earliest --dry-run
+docker exec kafka-1 $K/kafka-consumer-groups.sh --bootstrap-server kafka-1:9092 --group g-replay --topic lab-keys --reset-offsets --to-earliest --dry-run
 ```
 ```bash
-docker exec kafka-1 $K/kafka-consumer-groups.sh --bootstrap-server kafka-1:9092 --group g-replay --topic lab.keys --reset-offsets --to-earliest --execute
+docker exec kafka-1 $K/kafka-consumer-groups.sh --bootstrap-server kafka-1:9092 --group g-replay --topic lab-keys --reset-offsets --to-earliest --execute
 ```
 
 Run the first command's consumer again, without `--from-beginning`.
@@ -227,10 +227,10 @@ Run the first command's consumer again, without `--from-beginning`.
 Remove the topics and groups created by the experiments:
 
 ```bash
-docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --delete --topic lab.keys
+docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --delete --topic lab-keys
 ```
 ```bash
-docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --delete --topic lab.durability
+docker exec kafka-1 $K/kafka-topics.sh --bootstrap-server kafka-1:9092 --delete --topic lab-durability
 ```
 ```bash
 docker exec kafka-1 $K/kafka-consumer-groups.sh --bootstrap-server kafka-1:9092 --delete --group g1
@@ -254,6 +254,6 @@ Copy and fill in for each experiment.
 
 ## Notes
 
-- The experiment topics use the `lab.` prefix so they do not mix with the application topics created by `docker/create-topics.sh`.
+- The experiment topics use the `lab-` prefix so they do not mix with the application topics created by `docker/create-topics.sh`.
 - Several of these commands (publishing with keys, reading with partition and offset, consumer group `--describe`, `--reset-offsets` and the `acks` test of experiment 6) were run against the project cluster before being documented. The multi-terminal parts (experiments 3, 4 and 5) were not run.
 - Experiment 6 uses `min.insync.replicas=3` on purpose. Stopping 2 of 3 brokers also makes the KRaft quorum lose its majority (the nodes are brokers and controllers at the same time), which would mix two effects.

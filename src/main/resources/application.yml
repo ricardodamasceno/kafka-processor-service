@@ -46,5 +46,5 @@ app:
       max-retries: 3
       interval: 1s
     topics:
-      transactions: payments.transactions
-      transactions-dlq: payments.transactions.dlq
+      transactions: payments-transactions
+      transactions-dlq: payments-transactions-dlq

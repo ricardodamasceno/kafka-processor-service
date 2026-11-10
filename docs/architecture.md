@@ -106,7 +106,7 @@ Consumer group: `transaction-persister`. All instances of the application in a g
 1. `TransactionController` receives the JSON as a `TransactionRequest` and validates its format.
 2. It calls `TransactionService.requestCreation(accountId, type, amount, occurredAt)`.
 3. The service creates a `Transaction` (the domain validates its rules and an id is generated) and calls `TransactionEventPublisher`.
-4. `TransactionKafkaPublisher` serializes a `TransactionMessage` and sends it to the `payments.transactions` topic with the id as key. It waits for the broker acknowledgement.
+4. `TransactionKafkaPublisher` serializes a `TransactionMessage` and sends it to the `payments-transactions` topic with the id as key. It waits for the broker acknowledgement.
 5. The API answers **202 Accepted** with an empty body (no id and no `Location` header). Nothing is in the database yet.
 6. Later, `TransactionKafkaConsumer` reads the message, rebuilds the `Transaction` and calls `TransactionService.persist`.
 7. `TransactionRepositoryAdapter` converts the `Transaction` to a `TransactionJpaEntity` and saves it. From now on `GET /transactions/{id}` returns 200 (before that it returns 404). Since the response does not carry the id, a client finds the record with `GET /transactions` (most recent first).
