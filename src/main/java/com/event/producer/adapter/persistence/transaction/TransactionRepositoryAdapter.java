@@ -24,7 +24,8 @@ class TransactionRepositoryAdapter implements TransactionRepository {
 
     @Override
     public Transaction save(Transaction transaction) {
-        return TransactionMapper.toDomain(jpaRepository.save(TransactionMapper.toEntity(transaction)));
+        jpaRepository.save(TransactionMapper.toEntity(transaction));
+        return transaction;
     }
 
     @Override

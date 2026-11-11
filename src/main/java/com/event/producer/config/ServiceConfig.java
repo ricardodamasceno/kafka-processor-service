@@ -1,8 +1,10 @@
 package com.event.producer.config;
 
+import com.event.producer.application.movement.MovementService;
 import com.event.producer.application.transaction.TransactionService;
 import com.event.producer.application.user.UserService;
 import com.event.producer.application.user.UserStatusCache;
+import com.event.producer.domain.movement.MovementRepository;
 import com.event.producer.domain.transaction.TransactionRepository;
 import com.event.producer.domain.user.UserRepository;
 import org.springframework.context.annotation.Bean;
@@ -30,6 +32,11 @@ class ServiceConfig {
     TransactionService transactionService(TransactionRepository repository, UserRepository userRepository,
                                           UserService userService) {
         return new TransactionService(repository, userRepository, userService);
+    }
+
+    @Bean
+    MovementService movementService(MovementRepository repository, Clock clock) {
+        return new MovementService(repository, clock);
     }
 
     @Bean

@@ -26,7 +26,8 @@ class UserRepositoryAdapter implements UserRepository {
     @Override
     public User save(User user) {
         try {
-            return UserMapper.toDomain(jpaRepository.save(UserMapper.toEntity(user)));
+            jpaRepository.save(UserMapper.toEntity(user));
+            return user;
         } catch (DataIntegrityViolationException e) {
             if (isEmailViolation(e)) {
                 throw new ConflictException("A user with this email already exists", e);
