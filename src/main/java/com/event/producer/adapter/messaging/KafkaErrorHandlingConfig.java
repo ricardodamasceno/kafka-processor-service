@@ -1,11 +1,13 @@
 package com.event.producer.adapter.messaging;
 
 import com.event.producer.domain.shared.DomainValidationException;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.TopicPartition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.FixedBackOff;
 
@@ -18,8 +20,12 @@ import java.util.Map;
  *   <li>If it still fails, or if the message can never succeed (bad payload, broken domain rule),
  *       it is published to the topic's dead letter queue, so one bad message does not block the partition.</li>
  * </ol>
+ * Every message that goes to a dead letter queue is logged as a warning, with where it came from and why. The payload
+ * is not logged, because it can hold data of the users; the cause can still quote a value that was rejected.
+ * <p>
  * Spring Boot applies this handler to every {@code @KafkaListener}.
  */
+@Slf4j
 @Configuration
 class KafkaErrorHandlingConfig {
 
@@ -35,9 +41,25 @@ class KafkaErrorHandlingConfig {
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
                 kafkaTemplate, (record, exception) -> new TopicPartition(dlqBySourceTopic.get(record.topic()), -1));
 
+        ConsumerRecordRecoverer loggingRecoverer = (record, exception) -> {
+            log.warn("Message sent to {}: topic {}, partition {}, offset {}, key {}, cause {}",
+                    dlqBySourceTopic.get(record.topic()), record.topic(), record.partition(), record.offset(),
+                    record.key(), rootCause(exception));
+            recoverer.accept(record, exception);
+        };
+
         FixedBackOff backOff = new FixedBackOff(properties.retry().interval().toMillis(), properties.retry().maxRetries());
-        DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, backOff);
+        DefaultErrorHandler handler = new DefaultErrorHandler(loggingRecoverer, backOff);
         handler.addNotRetryableExceptions(InvalidMessageException.class, DomainValidationException.class);
         return handler;
+    }
+
+    /** The innermost cause, which is what went wrong; the listener wraps it in an exception that says little. */
+    private static String rootCause(Throwable exception) {
+        Throwable root = exception;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getClass().getSimpleName() + ": " + root.getMessage();
     }
 }
