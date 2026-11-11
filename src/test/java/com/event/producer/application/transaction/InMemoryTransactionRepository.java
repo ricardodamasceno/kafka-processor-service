@@ -2,6 +2,7 @@ package com.event.producer.application.transaction;
 
 import com.event.producer.domain.transaction.Transaction;
 import com.event.producer.domain.transaction.TransactionRepository;
+import com.event.producer.domain.transaction.TransactionStatus;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -47,5 +48,16 @@ class InMemoryTransactionRepository implements TransactionRepository {
     @Override
     public void deleteById(UUID id) {
         store.remove(id);
+    }
+
+    @Override
+    public boolean moveStatus(UUID id, TransactionStatus status, TransactionStatus newStatus) {
+        Transaction current = store.get(id);
+        if (current == null || current.status() != status) {
+            return false;
+        }
+        store.put(id, new Transaction(current.id(), current.userId(), current.accountId(), current.type(),
+                current.amount(), current.occurredAt(), newStatus));
+        return true;
     }
 }

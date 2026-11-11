@@ -30,7 +30,7 @@ What lives here: the entities and the rules that are always true, plus the **por
 |---|---|
 | `domain.transaction.Transaction` | Entity: an immutable record that validates itself in the constructor. It belongs to a user (`userId`). Money is `BigDecimal`, amount is always positive with at most 2 decimals |
 | `domain.transaction.TransactionType` | Enum: `DEPOSIT`, `WITHDRAWAL` |
-| `domain.transaction.TransactionStatus` | Enum: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`. Where a transaction is in its life |
+| `domain.transaction.TransactionStatus` | Enum: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`. Where a transaction is in its life. `canMoveTo` holds the allowed moves: `PENDING` goes to `PROCESSING` or `FAILED`, `PROCESSING` goes to `COMPLETED` or `FAILED`, and `COMPLETED` and `FAILED` are final |
 | `domain.transaction.TransactionRepository` | Port: the contract for storing transactions. Defined here, implemented elsewhere |
 | `domain.user.User` | Entity: an immutable record. The name is trimmed and the email is trimmed and lower-cased, so two emails that differ only in case are the same user. Limits: name up to 200 characters, email up to 320 and in a valid format |
 | `domain.user.UserRepository` | Port: the contract for storing users and checking whether an email is taken |
@@ -45,12 +45,13 @@ What lives here: the operations the system supports. Each service orchestrates d
 
 | Class | Role |
 |---|---|
-| `application.transaction.TransactionService` | `create`, `get`, `list`, `update`, `delete` for transactions. `create` checks that the user exists and is `ACTIVE`, through the `UserRepository` port |
+| `application.transaction.TransactionService` | `create`, `validate`, `get`, `list`, `update`, `delete` for transactions. `validate` is the first step of the life of a transaction, while it is `PENDING`: it checks that the user is `ACTIVE` (through `UserService.statusOf`) and moves the transaction to `PROCESSING`, or to `FAILED` otherwise. The move is atomic and only happens while the transaction is still `PENDING`. `create` checks that the user exists, through the `UserRepository` port. Whether the user is active is not checked there: it is the job of the validation step |
 | `application.transaction.TransactionEvent` | Something that happened to a transaction: a type, the complete state of the transaction, and an id that stays the same if the event is produced twice |
 | `application.transaction.TransactionEventType` | `TRANSACTION_CREATED`, `TRANSACTION_PROCESSING`, `TRANSACTION_COMPLETED`, `TRANSACTION_FAILED` |
 | `application.transaction.TransactionEventPublisher` | Outbound port: how the application announces a transaction event. Implemented by the Kafka adapter |
-| `application.user.UserService` | `register`: validates, assigns an id and the registration time (from the `Clock`), refuses an email that is already registered, saves the user as `ACTIVE` and caches the status. `updateStatus`: sets any of the three statuses, from any status, and refreshes the cached status |
-| `application.user.UserStatusCache` | Outbound port: a fast copy of the status of each user, kept outside the database. Writing is best effort and must not throw. Implemented by the Redis adapter |
+| `application.user.UserService` | `register`: validates, assigns an id and the registration time (from the `Clock`), refuses an email that is already registered, saves the user as `ACTIVE` and caches the status. `updateStatus`: sets any of the three statuses, from any status, and refreshes the cached status. `statusOf`: the status of a user, from the cache first and from the database when the cache has no entry, filling the cache after a database read |
+| `application.user.UserStatusCache` | Outbound port: a fast copy of the status of each user, kept outside the database. `put` and `find` are best effort and must not throw: when the cache is unavailable `find` answers "no entry". Implemented by the Redis adapter |
+| `application.transaction.ValidationOutcome` | What `validate` did: `PROCESSING`, `FAILED`, or `NOT_PENDING` (the transaction was not `PENDING` any more, so nothing changed) |
 | `application.shared.NotFoundException` | Thrown when a resource does not exist |
 | `application.shared.ConflictException` | Thrown when a request conflicts with what already exists, such as a registered email |
 | `application.shared.PublishFailedException` | Thrown when an event could not be published |
@@ -87,7 +88,7 @@ DTOs are separate from domain entities so the API contract and the domain model 
 |---|---|
 | `TransactionJpaEntity` | JPA class that maps to the table. It is **not** the domain entity |
 | `TransactionJpaRepository` | Spring Data interface (Spring generates the SQL access) |
-| `TransactionRepositoryAdapter` | Implements the domain port and delegates to Spring Data; it does the persistence only |
+| `TransactionRepositoryAdapter` | Implements the domain port and delegates to Spring Data; it does the persistence only. `moveStatus` is a single `UPDATE ... WHERE status = :status`, so the database decides who wins when two callers move the same transaction |
 | `UserJpaEntity`, `UserJpaRepository`, `UserMapper` | The same three pieces for the `users` table. The repository checks the email with `lower()`, which is what the unique index covers |
 | `UserRepositoryAdapter` | Implements `UserRepository`. When the unique index on the email rejects an insert, it throws `ConflictException` |
 | `TransactionMapper` | Converts between domain entity and JPA entity (`toEntity` / `toDomain`). Its only responsibility is this translation. It is a stateless utility class with static methods, not a Spring bean |
@@ -100,7 +101,7 @@ Why `TransactionJpaRepository` needs no `@Repository`: it is only an interface. 
 
 | Class | Role |
 |---|---|
-| `RedisUserStatusCache` | Implements the `UserStatusCache` port. One entry per user: the key is `user:status:<userId>`, the value is the status name, and it expires after `app.cache.user-status-ttl`. A failure to reach Redis is logged as a warning and swallowed |
+| `RedisUserStatusCache` | Implements the `UserStatusCache` port. One entry per user: the key is `user:status:<userId>`, the value is the status name, and it expires after `app.cache.user-status-ttl`. A failure to reach Redis is logged as a warning and swallowed on a write, and counts as "no entry" on a read, as does an entry that is not a status |
 | `CacheProperties` | The settings under `app.cache`, read from `application.yml` |
 
 **`adapter.messaging`** (Kafka: both driving and driven)
@@ -114,12 +115,13 @@ The package `cdc` is the only part that knows how the changes are captured. Ever
 | `cdc.TransactionChangeMessage` | The JSON shape of a change as Debezium publishes it (`op`, `before`, `after`). The row fields use the column names, so the table schema is the contract of that topic |
 | `transaction.TransactionEventKafkaPublisher` | Implements the event publisher port (the **producer**). Key = transaction id. `TRANSACTION_CREATED` goes to `payments-transactions-create`, the other events to `payments-transactions-update` |
 | `transaction.TransactionEventMessage` | The JSON shape of a transaction event: the contract of those topics, separate from the domain class |
+| `transaction.TransactionCreatedConsumer` | `@KafkaListener` class (the **validator**) of `payments-transactions-create`. Reads each `TRANSACTION_CREATED` event and calls `TransactionService.validate`. An event it cannot understand, or that has no user, goes to the dead letter queue without retries |
 | `KafkaMessageSender` | Sends a message and waits for the broker acknowledgement (`acks=all`) |
 | `JsonMessageCodec` | Converts messages to and from JSON text. Messages are plain JSON strings on the topic |
 | `KafkaErrorHandlingConfig` | Retries a failed message, then sends it to the dead letter queue (DLQ). Bad payloads and broken domain rules skip the retries |
 | `MessagingProperties` | Topic names, send timeout and retry policy, read from `application.yml` |
 
-Consumer group: `transaction-event-translator`. All instances of the application in a group share the partitions.
+Consumer groups: `transaction-event-translator` (the translator, on `transactions-cdc-events`) and `transaction-validator` (the validator, on `payments-transactions-create`). All instances of the application in a group share the partitions.
 
 ### `config`: frameworks and wiring
 
@@ -132,13 +134,24 @@ Consumer group: `transaction-event-translator`. All instances of the application
 1. `TransactionController` receives the JSON as a `TransactionRequest` and validates its format.
 2. It calls `TransactionService.create(userId, accountId, type, amount, occurredAt)`.
 3. The service creates a `Transaction` with an id and the status `PENDING`. The domain validates its rules first, so invalid data is a **400** whatever the user.
-4. The service looks for the user through the `UserRepository` port. If the user does not exist it throws `NotFoundException` (**404**). If the user is not `ACTIVE` it throws `ConflictException` (**409**), and nothing is saved.
+4. The service looks for the user through the `UserRepository` port. If the user does not exist it throws `NotFoundException` (**404**) and nothing is saved, because a transaction for a user that does not exist makes no sense. Whether the user is `ACTIVE` is **not** checked here: a request for a user that is not active is accepted, and the validation step fails the transaction a moment later.
 5. `TransactionRepositoryAdapter` converts the `Transaction` to a `TransactionJpaEntity` and saves it.
 6. The API answers **202 Accepted** with an empty body (no id and no `Location` header). The row is already in the database, so `GET /transactions/{id}` returns 200 straight away, with the status `PENDING`. Since the response does not carry the id, a client finds the record with `GET /transactions` (most recent first).
 7. Debezium reads the insert from the PostgreSQL write-ahead log and publishes the change to `transactions-cdc-events`.
-8. `TransactionChangeConsumer` reads the change, `TransactionChangeTranslator` turns it into a `TRANSACTION_CREATED` event (the complete state of the transaction, including the `userId`, with the event id `<transactionId>:PENDING`), and `TransactionEventKafkaPublisher` publishes it to `payments-transactions-create` with the transaction id as key. Nothing reads that topic yet, so nothing moves the transaction past `PENDING`.
+8. `TransactionChangeConsumer` reads the change, `TransactionChangeTranslator` turns it into a `TRANSACTION_CREATED` event (the complete state of the transaction, including the `userId`, with the event id `<transactionId>:PENDING`), and `TransactionEventKafkaPublisher` publishes it to `payments-transactions-create` with the transaction id as key. The validator reads that topic, as described below.
 
 When the status changes later (`PROCESSING`, `COMPLETED` or `FAILED`), the same path publishes the matching event to `payments-transactions-update`. A change that does not alter the status, such as a `PUT` that only changes the amount, and a delete produce no event.
+
+**Validation, the `PENDING` stage.** `TransactionCreatedConsumer` (group `transaction-validator`) reads the `TRANSACTION_CREATED` event and calls `TransactionService.validate`. This is where a transaction is validated, and carrying it out is a later stage:
+
+1. `UserService.statusOf` looks for the status of the user in Redis (`user:status:<userId>`). If there is no entry, it reads the database and writes the status to Redis for the next time.
+2. If the user is `ACTIVE`, the transaction moves from `PENDING` to `PROCESSING`. If the user is not active, or does not exist, it moves to `FAILED`.
+3. The move is one `UPDATE ... WHERE status = 'PENDING'`. If the transaction is no longer `PENDING` (the same event delivered twice, or handled by another instance), nothing changes and the outcome is `NOT_PENDING`.
+4. The status change is a change of the `transactions` table, so it follows the usual path: Debezium, the translator, and an event `TRANSACTION_PROCESSING` or `TRANSACTION_FAILED` on `payments-transactions-update`. The validator publishes nothing itself.
+
+If the validation throws (for example the database is down), the message is retried and then goes to `payments-transactions-create-dlq`, and the transaction stays `PENDING`. See [ADR 0008](adr/0008-validate-transactions-in-a-consumer-of-created-events.md).
+
+`POST /transactions` rejects an unknown user at once (404) but does not look at the status of the user. The `PENDING` stage is the only place where the status is checked, so a request for a blocked or inactive user is answered with `202` and the transaction ends as `FAILED`.
 
 `GET`, `PUT` and `DELETE` go straight to the database. Every change to the table, including these, is published to `transactions-cdc-events`. `PUT` keeps the current owner and status, because the request does not carry them: a `userId` sent in a `PUT` body is ignored.
 
@@ -168,7 +181,7 @@ curl -i -X POST http://localhost:8080/users -H "Content-Type: application/json" 
 curl -i -X PUT http://localhost:8080/users/<id>/status -H "Content-Type: application/json" -d '{"status":"BLOCKED"}'
 ```
 
-A user that is not `ACTIVE` cannot create transactions: `POST /transactions` answers 409. Creating a transaction still reads the status from the database, not from the cache. See [ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md).
+A user that is not `ACTIVE` cannot have a transaction carried out: its transactions are moved to `FAILED` by the validation step. `POST /transactions` does not check this. See [ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md) and [ADR 0008](adr/0008-validate-transactions-in-a-consumer-of-created-events.md).
 
 ## Lombok
 
@@ -208,7 +221,9 @@ The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.ma
 - **Mapper tests** (`TransactionMapperTest`): check that the conversion in both directions loses nothing.
 - **Service tests** (`TransactionServiceTest`): use `InMemoryTransactionRepository`, a test double that implements the port. This works because services depend on the interface, not on JPA. `TransactionServiceTest` also uses `InMemoryUserRepository`. They cover: a created transaction is `PENDING` and owned by the user, an unknown user and a user that is `INACTIVE` or `BLOCKED` store nothing, invalid data is rejected before the user is looked up, `update` keeps the owner and the status, `delete`, and paging.
 - **User tests** (`UserTest`, `UserServiceTest`, `UserMapperTest`): normalization, the name and email rules, a duplicated email regardless of case, nothing stored when the data is invalid, the registration time coming from a fixed `Clock`, a new user being `ACTIVE`, any status being accepted from any other, the status written to the cache on registration and on every update, and nothing cached when a request is rejected.
-- **Cache tests** (`RedisUserStatusCacheTest`): the key, the value and the expiry written to Redis (checked with a recording stand-in, without a Redis server), that a failure to reach Redis is swallowed, and that the expiry must be greater than zero.
+- **Cache tests** (`RedisUserStatusCacheTest`): the key, the value and the expiry written to Redis (checked with a recording stand-in, without a Redis server), that a failure to reach Redis is swallowed, and that the expiry must be greater than zero. Reading is covered too: the status that was written, no entry, an entry that is not a status, and Redis being down all give the expected answer.
+- **Validation tests** (also in `TransactionServiceTest`): an active user moves the transaction to `PROCESSING`; an `INACTIVE`, `BLOCKED` or unknown user moves it to `FAILED`; the cache is read first and the database is not touched when it has the status; an entry in the cache wins even when it differs from the database; a miss reads the database and fills the cache; the same event twice validates once; and a transaction that is not `PENDING`, or does not exist, is left alone.
+- **State machine test** (`TransactionStatusTest`): every move between the four statuses is checked against the allowed ones.
 - **Event tests** (`TransactionEventTest`): the event type follows the status, and the event id is the same for the same transaction and status.
 - **Translator tests** (`TransactionChangeTranslatorTest`): every rule of the translation table, plus the rejections: an update without the old row, a change without an operation, an incomplete row, and a row that breaks a domain rule.
 - **Message contract tests** (`JsonMessageCodecTest`, `TransactionEventMessageTest`): read an insert, an update and a delete in the shape Debezium publishes (including envelope fields the service ignores), reject malformed payloads and unknown enum values, and check the JSON of a transaction event.
@@ -220,15 +235,16 @@ The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.ma
 - One service per entity was chosen over one class per operation (use case) to reduce the number of files. The trade-off is that a service can grow large and accumulate dependencies as business logic increases.
 - Update is done in two repository calls (read, then save), not in a single database transaction. For a plain CRUD this is acceptable; for logic that needs atomicity, add a transaction boundary.
 - Transactions here are fully editable and deletable because CRUD was requested. A real ledger would normally be append-only (corrections are new entries).
-- A new transaction is visible right after the 202, as `PENDING`. Nothing moves it past `PENDING` yet: the executor that reads `payments-transactions-create` and the notifier that reads `payments-transactions-update` are the next steps. There is no state machine either, so nothing stops an invalid status change.
+- A new transaction is visible right after the 202, as `PENDING`. The validator then moves it to `PROCESSING` or `FAILED`. Nothing carries out a `PROCESSING` transaction yet, and nothing reads `payments-transactions-update`: the executor and the notifier are the next steps. The allowed moves are in `TransactionStatus.canMoveTo`, but only the validator uses them so far: `update` through the API and a direct change in the database can still set any status.
+- A `FAILED` transaction records no reason, and a message that reaches a dead letter queue leaves its transaction `PENDING` with nothing to replay it or time it out.
 - Consumers never see a `PUT` that does not change the status, nor a delete, because the translator produces no event for them.
 - There is no idempotency key from the client: a client that retries a `POST` after a timeout creates a second transaction.
 - Delivery is at-least-once, so the same event can be published twice. Its id is the same each time, so a consumer can ignore a duplicate. Order is kept inside each event topic but not between the two. A message in a DLQ needs a human or a job to look at it: there is no automatic reprocessing yet.
 - Paging is offset-based (`page` and `size`, size capped by `app.pagination.max-page-size`).
 - Identifiers are random UUIDs generated by the service.
-- Only an `ACTIVE` user can create a transaction. The status is checked only when a transaction is created, so blocking a user does not stop the transactions that are already `PENDING`.
+- A request for a user that is not `ACTIVE` is accepted (`202`) and the transaction fails a moment later, during the validation. The client only finds out by reading the transaction (`FAILED`), and nothing says why. The status is checked once, at the validation, so blocking a user afterwards does not stop a transaction that is already `PROCESSING`.
 - `PUT /users/{id}/status` has no authentication and keeps no history of who changed a status or when, so anyone who can reach the API can block a user.
-- The cached user status is written but not read yet: creating a transaction still reads the status from the database. The cached value can be missing (Redis was down when the status changed, or the entry expired) or briefly different from the database, so a reader must treat a missing entry as a miss and fall back to the database. See [ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md).
+- The cached user status is read by the validator, which trusts what it finds, and `POST /transactions` does not look at the status. The cached value can be missing (Redis was down when the status changed, or the entry expired) or briefly different from the database, so a reader must treat a missing entry as a miss and fall back to the database. See [ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md).
 - `POST /users` has no authentication, so anyone can register. It answers 409 for an email that is already registered, which tells a caller that the email exists.
 - The user is checked and then the transaction is saved, in two steps. A user cannot be deleted through the API today, so nothing can remove the user in between, and the foreign key is the last line of defence.
 - A transaction cannot change owner: the owner is set at creation and `PUT` keeps it.

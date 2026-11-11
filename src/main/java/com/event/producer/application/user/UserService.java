@@ -8,6 +8,7 @@ import com.event.producer.domain.user.UserStatus;
 import lombok.RequiredArgsConstructor;
 
 import java.time.Clock;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -39,6 +40,24 @@ public class UserService {
         User saved = repository.save(user);
         statusCache.put(saved.id(), saved.status());
         return saved;
+    }
+
+    /**
+     * The status of a user: from the cache when it is there, otherwise from the database, filling the cache for the
+     * next time. Empty when the user does not exist.
+     * <p>
+     * The cache can be missing or briefly different from the database (see ADR 0007), and an entry found there is
+     * trusted. The cache is filled only after a database read, so it never holds a status that was not read from
+     * the database or written by {@link #register} or {@link #updateStatus}.
+     */
+    public Optional<UserStatus> statusOf(UUID userId) {
+        Optional<UserStatus> cached = statusCache.find(userId);
+        if (cached.isPresent()) {
+            return cached;
+        }
+        Optional<User> user = repository.findById(userId);
+        user.ifPresent(found -> statusCache.put(found.id(), found.status()));
+        return user.map(User::status);
     }
 
     /**

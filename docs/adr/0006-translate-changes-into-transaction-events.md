@@ -13,7 +13,7 @@
 
 - The translator is `TransactionChangeConsumer` plus `TransactionChangeTranslator`, in the package `adapter.messaging.cdc`. That package is the only place that knows Debezium's format and the columns of the table. The events are defined in the application layer (`TransactionEvent`, `TransactionEventType`) and published through the port `TransactionEventPublisher`, which the Kafka adapter implements.
 - **Two topics, each with a dead letter queue:**
-  - `payments-transactions-create` carries `TRANSACTION_CREATED`. It is the **work to do**, and the executor will read it.
+  - `payments-transactions-create` carries `TRANSACTION_CREATED`. It is the **work to do**, and the validation step reads it ([ADR 0008](0008-validate-transactions-in-a-consumer-of-created-events.md)).
   - `payments-transactions-update` carries `TRANSACTION_PROCESSING`, `TRANSACTION_COMPLETED` and `TRANSACTION_FAILED`. They are **facts about what happened**, and the notifier will read them.
 - **The key is the transaction id** in both topics, so the events of one transaction keep their order inside a topic.
 - **An event carries the complete state of the transaction**, a type, and an event id (`<transactionId>:<status>`). A consumer never needs the previous state. A transaction reaches each status once, so the event id is the same if the event is published twice, and a consumer can use it to ignore a duplicate.
@@ -44,5 +44,5 @@ Alternatives considered:
 - Delivery is at-least-once: the same event can be published twice. Kafka transactions are not used, because duplicates are harmless when consumers use the event id.
 - Order is kept inside each topic but not between the two. A consumer that reads both can see an update before the creation, which is why each event carries the complete state.
 - Changes that do not alter the status (a `PUT`) and deletes produce no event, so consumers never see them. Whether they should is still to be decided.
-- Nothing reads the two event topics yet. The executor and the notifier are the next steps.
+- Only the validation step reads the creation topic ([ADR 0008](0008-validate-transactions-in-a-consumer-of-created-events.md)). Nothing reads the update topic yet, and nothing carries out a `PROCESSING` transaction. The executor and the notifier are the next steps.
 - The event format is now a public contract. It should get a versioned schema (Schema Registry) before more consumers depend on it.

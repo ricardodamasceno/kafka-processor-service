@@ -27,8 +27,9 @@ class ServiceConfig {
     }
 
     @Bean
-    TransactionService transactionService(TransactionRepository repository, UserRepository userRepository) {
-        return new TransactionService(repository, userRepository);
+    TransactionService transactionService(TransactionRepository repository, UserRepository userRepository,
+                                          UserService userService) {
+        return new TransactionService(repository, userRepository, userService);
     }
 
     @Bean

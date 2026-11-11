@@ -2,6 +2,7 @@ package com.event.producer.adapter.persistence.transaction;
 
 import com.event.producer.domain.transaction.Transaction;
 import com.event.producer.domain.transaction.TransactionRepository;
+import com.event.producer.domain.transaction.TransactionStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -45,5 +46,10 @@ class TransactionRepositoryAdapter implements TransactionRepository {
     @Override
     public void deleteById(UUID id) {
         jpaRepository.deleteById(id);
+    }
+
+    @Override
+    public boolean moveStatus(UUID id, TransactionStatus status, TransactionStatus newStatus) {
+        return jpaRepository.moveStatus(id, status, newStatus) > 0;
     }
 }

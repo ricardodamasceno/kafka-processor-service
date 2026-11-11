@@ -1,6 +1,6 @@
 # Redis
 
-Redis is available in the local environment, the application has the client library and its connection settings, and the first use is the cache of the status of users ([ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md)). **Nothing reads that cache yet**: it is written when a user is registered and whenever a status changes.
+Redis is available in the local environment, the application has the client library and its connection settings, and the first use is the cache of the status of users ([ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md)). It is written when a user is registered and whenever a status changes, and it is read by the validation of created transactions ([ADR 0008](adr/0008-validate-transactions-in-a-consumer-of-created-events.md)).
 
 ## Pieces
 
@@ -60,6 +60,8 @@ Its own settings and connections are kept in the volume `redisinsight-data`. The
 | `user:status:<userId>` | The status name: `ACTIVE`, `INACTIVE` or `BLOCKED` | After `app.cache.user-status-ttl` (1 minute) | A user is registered, and on every `PUT /users/{id}/status` (including one that sets the status the user already has, which also refreshes the expiry) |
 
 The database is the source of truth, and the cache is a copy. Writing to Redis is best effort: if Redis is unavailable the application logs a warning and the operation still succeeds, so an entry can be missing or briefly different from the database. Whoever reads it must treat a missing entry as a miss and read the database. See [ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md).
+
+The validation of created transactions reads the entry first. When there is none (it expired, was never written, or Redis is unavailable), it reads the database and writes the status back for the next time. An entry found in Redis is trusted, even if it differs from the database. It was checked with an entry set by hand to `BLOCKED` for a user that is `ACTIVE` in the database: the transaction failed.
 
 Look at the entries:
 

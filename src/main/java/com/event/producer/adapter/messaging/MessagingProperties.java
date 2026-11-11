@@ -27,12 +27,14 @@ public record MessagingProperties(
     /**
      * Topic names. The change events are read from {@code transactionsCdcEvents}, and a message that cannot be
      * processed goes to its dead letter queue (DLQ). The translated events are published to
-     * {@code transactionsCreate} and {@code transactionsUpdate}.
+     * {@code transactionsCreate} and {@code transactionsUpdate}; the creation events are also read from
+     * {@code transactionsCreate}, with {@code transactionsCreateDlq} as its dead letter queue.
      */
     public record Topics(
             @NotBlank String transactionsCdcEvents,
             @NotBlank String transactionsCdcEventsDlq,
             @NotBlank String transactionsCreate,
+            @NotBlank String transactionsCreateDlq,
             @NotBlank String transactionsUpdate) {
     }
 }

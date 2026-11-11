@@ -20,6 +20,7 @@ Convention: a `docs/` folder at the project root, with architecture decisions re
 - [0005. Create transactions as PENDING and react to their change events](adr/0005-pending-transactions-and-cdc-events.md)
 - [0006. Translate row changes into transaction events](adr/0006-translate-changes-into-transaction-events.md)
 - [0007. Cache the status of users in Redis](adr/0007-cache-the-status-of-users-in-redis.md)
+- [0008. Validate transactions in a consumer of the created events](adr/0008-validate-transactions-in-a-consumer-of-created-events.md)
 
 ## Rules
 

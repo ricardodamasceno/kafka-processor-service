@@ -26,7 +26,7 @@ Kept from ADR 0002:
 
 - A transaction can be read right after the `202`, as `PENDING`. The window in which `GET`, `PUT` and `DELETE` returned 404 is gone.
 - Creating a transaction depends only on the database. A Kafka or Debezium outage delays the processing but does not stop requests from being accepted, so the `503` for a broker failure no longer exists.
-- Nothing moves a transaction past `PENDING` yet, and there is no state machine, so nothing stops an invalid status change.
+- At first nothing moved a transaction past `PENDING`, and there was no state machine. [ADR 0008](0008-validate-transactions-in-a-consumer-of-created-events.md) adds the validation step, which moves it to `PROCESSING` or `FAILED`, and the allowed moves in `TransactionStatus.canMoveTo`. Carrying out a `PROCESSING` transaction is still not implemented.
 - There is no idempotency key from the client. A client that retries a `POST` after a timeout creates a second transaction. A client-supplied id or key with a unique index is the next protection to add.
 - The response still has no id. Now that the row exists, the id could be returned.
 - The consumer sees every change to the table, including `PUT` and `DELETE`, not only the creation.

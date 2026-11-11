@@ -20,4 +20,11 @@ public interface TransactionRepository {
     boolean existsById(UUID id);
 
     void deleteById(UUID id);
+
+    /**
+     * Moves a transaction to another status only if it is still in {@code status}, as a single atomic step.
+     * Returns whether it moved: {@code false} when the transaction does not exist or is no longer in
+     * {@code status}, for example because an earlier delivery of the same event already handled it.
+     */
+    boolean moveStatus(UUID id, TransactionStatus status, TransactionStatus newStatus);
 }

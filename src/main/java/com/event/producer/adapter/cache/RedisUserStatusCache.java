@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -32,6 +33,18 @@ class RedisUserStatusCache implements UserStatusCache {
             redis.opsForValue().set(KEY_PREFIX + userId, status.name(), properties.userStatusTtl());
         } catch (RuntimeException e) {
             log.warn("Could not cache the status of user {}: {}", userId, e.toString());
+        }
+    }
+
+    @Override
+    public Optional<UserStatus> find(UUID userId) {
+        try {
+            String value = redis.opsForValue().get(KEY_PREFIX + userId);
+            return value == null ? Optional.empty() : Optional.of(UserStatus.valueOf(value));
+        } catch (RuntimeException e) {
+            // Redis is unavailable, or the entry holds something that is not a status: either way the caller reads the database
+            log.warn("Could not read the cached status of user {}: {}", userId, e.toString());
+            return Optional.empty();
         }
     }
 }

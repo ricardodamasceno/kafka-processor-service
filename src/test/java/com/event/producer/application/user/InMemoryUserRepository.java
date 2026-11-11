@@ -17,6 +17,9 @@ public class InMemoryUserRepository implements UserRepository {
 
     final Map<UUID, User> store = new LinkedHashMap<>();
 
+    /** How many times a user was read by id, so a test can tell whether the database was used. */
+    public int findByIdCalls;
+
     @Override
     public User save(User user) {
         store.put(user.id(), user);
@@ -25,6 +28,7 @@ public class InMemoryUserRepository implements UserRepository {
 
     @Override
     public Optional<User> findById(UUID id) {
+        findByIdCalls++;
         return Optional.ofNullable(store.get(id));
     }
 

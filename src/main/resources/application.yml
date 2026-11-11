@@ -61,6 +61,8 @@ app:
       # Row changes of the transactions table, published by Debezium (see docs/debezium.md)
       transactions-cdc-events: transactions-cdc-events
       transactions-cdc-events-dlq: transactions-cdc-events-dlq
-      # Transaction events published by the translator: the work to do (create) and what happened (update)
+      # Transaction events published by the translator: the work to do (create) and what happened (update).
+      # The creation events are read by the validation step, so that topic has a dead letter queue.
       transactions-create: payments-transactions-create
+      transactions-create-dlq: payments-transactions-create-dlq
       transactions-update: payments-transactions-update

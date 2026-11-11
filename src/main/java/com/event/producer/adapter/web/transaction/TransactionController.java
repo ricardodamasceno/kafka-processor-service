@@ -32,7 +32,8 @@ class TransactionController {
 
     /**
      * The transaction is saved as {@code PENDING} and processed later, asynchronously. So the answer is
-     * 202 (accepted), not 201 (created), with an empty body. The user has to exist (404) and be active (409).
+     * 202 (accepted), not 201 (created), with an empty body. The user has to exist (404). Whether the user is active is checked later, by the validation step, which
+     * moves the transaction to {@code FAILED} when it is not.
      */
     @PostMapping
     ResponseEntity<Void> create(@Valid @RequestBody TransactionRequest request) {

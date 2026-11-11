@@ -81,8 +81,8 @@ Defined in the `TOPICS` variable of `docker/create-topics.sh`, in the format `na
 |---|---|---|---|
 | `transactions-cdc-events` | 6 | 3 | Row changes of the `transactions` table, published by Debezium (key = primary key). Internal: only the translator (group `transaction-event-translator`) reads it. See [debezium.md](debezium.md) |
 | `transactions-cdc-events-dlq` | 3 | 3 | Messages from the CDC topic that failed after retries (dead letter queue) |
-| `payments-transactions-create` | 6 | 3 | `TRANSACTION_CREATED` events, the work to do (key = transaction id). Published by the translator; the executor will read it |
-| `payments-transactions-create-dlq` | 3 | 3 | Dead letter queue of the topic above, for its future consumer |
+| `payments-transactions-create` | 6 | 3 | `TRANSACTION_CREATED` events, the work to do (key = transaction id). Published by the translator and read by the validation consumer (group `transaction-validator`) |
+| `payments-transactions-create-dlq` | 3 | 3 | Dead letter queue of the topic above: what the validation consumer could not process after its retries, or could not understand |
 | `payments-transactions-update` | 6 | 3 | `TRANSACTION_PROCESSING`, `TRANSACTION_COMPLETED` and `TRANSACTION_FAILED` events, facts about what happened (key = transaction id). Published by the translator; the notifier will read it |
 | `payments-transactions-update-dlq` | 3 | 3 | Dead letter queue of the topic above, for its future consumer |
 

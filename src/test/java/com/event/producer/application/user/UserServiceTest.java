@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -124,6 +125,36 @@ class UserServiceTest {
 
         assertEquals(UserStatus.ACTIVE, updated.status());
         assertEquals(writesBefore + 1, cache.writes);
+    }
+
+    @Test
+    void statusOfReadsTheCacheFirstAndDoesNotTouchTheDatabase() {
+        User user = service.register("Alice", "alice@example.com");
+        cache.entries.put(user.id(), UserStatus.BLOCKED); // the cache says BLOCKED, the database says ACTIVE
+        int readsBefore = repository.findByIdCalls;
+
+        assertEquals(Optional.of(UserStatus.BLOCKED), service.statusOf(user.id()));
+        assertEquals(readsBefore, repository.findByIdCalls);
+    }
+
+    @Test
+    void statusOfFallsBackToTheDatabaseWhenTheCacheHasNoEntryAndFillsTheCache() {
+        User user = service.register("Alice", "alice@example.com");
+        service.updateStatus(user.id(), UserStatus.INACTIVE);
+        cache.entries.clear(); // the entry expired
+        int writesBefore = cache.writes;
+
+        assertEquals(Optional.of(UserStatus.INACTIVE), service.statusOf(user.id()));
+        assertEquals(UserStatus.INACTIVE, cache.entries.get(user.id()));
+        assertEquals(writesBefore + 1, cache.writes);
+    }
+
+    @Test
+    void statusOfAnUnknownUserIsEmptyAndFillsNothing() {
+        UUID unknown = UUID.randomUUID();
+
+        assertEquals(Optional.empty(), service.statusOf(unknown));
+        assertEquals(0, cache.writes);
     }
 
     @Test
