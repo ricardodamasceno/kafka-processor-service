@@ -1,6 +1,7 @@
 package com.event.producer.application.user;
 
 import com.event.producer.application.shared.ConflictException;
+import com.event.producer.application.shared.NotFoundException;
 import com.event.producer.domain.user.User;
 import com.event.producer.domain.user.UserRepository;
 import com.event.producer.domain.user.UserStatus;
@@ -11,16 +12,20 @@ import java.util.UUID;
 
 /**
  * Application service for users. No Spring annotations; it is wired in {@code config.ServiceConfig}.
+ * <p>
+ * Every time a user is saved, the status is also written to the {@link UserStatusCache}, after the database,
+ * which stays the source of truth.
  */
 @RequiredArgsConstructor
 public class UserService {
 
     private final UserRepository repository;
     private final Clock clock;
+    private final UserStatusCache statusCache;
 
     /**
      * Validates the data (the {@link User} constructor enforces the domain rules), assigns an id and the
-     * registration time, and saves the user as {@code ACTIVE}.
+     * registration time, saves the user as {@code ACTIVE} and caches the status.
      *
      * @throws ConflictException when the email is already registered, regardless of case
      */
@@ -31,6 +36,23 @@ public class UserService {
         }
         // Two requests can pass the check above at the same time: the unique index decides, and the
         // repository reports the loser with the same exception.
-        return repository.save(user);
+        User saved = repository.save(user);
+        statusCache.put(saved.id(), saved.status());
+        return saved;
+    }
+
+    /**
+     * Sets the status of a user and refreshes the cached status. Any status can be set from any other
+     * ({@code ACTIVE}, {@code INACTIVE} or {@code BLOCKED}). Setting the status the user already has is accepted:
+     * it changes nothing in the database and refreshes the cache.
+     *
+     * @throws NotFoundException when the user does not exist
+     */
+    public User updateStatus(UUID id, UserStatus status) {
+        User user = repository.findById(id)
+                .orElseThrow(() -> new NotFoundException("User " + id + " not found"));
+        User updated = repository.save(user.withStatus(status));
+        statusCache.put(updated.id(), updated.status());
+        return updated;
     }
 }

@@ -66,6 +66,25 @@ class UserTest {
     }
 
     @Test
+    void withStatusReturnsACopyWithOnlyTheStatusChanged() {
+        User user = with("Alice", "alice@example.com");
+
+        User blocked = user.withStatus(UserStatus.BLOCKED);
+
+        assertEquals(UserStatus.BLOCKED, blocked.status());
+        assertEquals(user.id(), blocked.id());
+        assertEquals(user.name(), blocked.name());
+        assertEquals(user.email(), blocked.email());
+        assertEquals(user.createdAt(), blocked.createdAt());
+        assertEquals(UserStatus.ACTIVE, user.status());
+    }
+
+    @Test
+    void withStatusRejectsANullStatus() {
+        assertThrows(NullPointerException.class, () -> with("Alice", "alice@example.com").withStatus(null));
+    }
+
+    @Test
     void rejectsNullFields() {
         // Lombok's @NonNull makes the constructor throw NullPointerException
         assertThrows(NullPointerException.class, () -> with(null, "a@example.com"));

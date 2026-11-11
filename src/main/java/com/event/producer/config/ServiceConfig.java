@@ -2,6 +2,7 @@ package com.event.producer.config;
 
 import com.event.producer.application.transaction.TransactionService;
 import com.event.producer.application.user.UserService;
+import com.event.producer.application.user.UserStatusCache;
 import com.event.producer.domain.transaction.TransactionRepository;
 import com.event.producer.domain.user.UserRepository;
 import org.springframework.context.annotation.Bean;
@@ -31,7 +32,7 @@ class ServiceConfig {
     }
 
     @Bean
-    UserService userService(UserRepository repository, Clock clock) {
-        return new UserService(repository, clock);
+    UserService userService(UserRepository repository, Clock clock, UserStatusCache statusCache) {
+        return new UserService(repository, clock, statusCache);
     }
 }

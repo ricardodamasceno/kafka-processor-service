@@ -45,4 +45,9 @@ public record User(
             throw new DomainValidationException("email is not valid");
         }
     }
+
+    /** A copy of the user with another status. Any status can be set from any other. */
+    public User withStatus(@NonNull UserStatus newStatus) {
+        return new User(id, name, email, createdAt, newStatus);
+    }
 }

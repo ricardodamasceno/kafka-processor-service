@@ -1,6 +1,6 @@
 # Redis
 
-Redis is available in the local environment, and the application has the client library and its connection settings. **Nothing uses Redis yet.** What it will hold (a cache, idempotency keys, other state) is not decided, so there is no ADR yet. The first use should bring one.
+Redis is available in the local environment, the application has the client library and its connection settings, and the first use is the cache of the status of users ([ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md)). **Nothing reads that cache yet**: it is written when a user is registered and whenever a status changes.
 
 ## Pieces
 
@@ -53,6 +53,20 @@ docker compose -f docker/docker-compose.yml up -d redisinsight
 
 Its own settings and connections are kept in the volume `redisinsight-data`. The interface has no login of its own, so it is for local use only.
 
+## What the application stores
+
+| Key | Value | Expires | Written when |
+|---|---|---|---|
+| `user:status:<userId>` | The status name: `ACTIVE`, `INACTIVE` or `BLOCKED` | After `app.cache.user-status-ttl` (1 hour) | A user is registered, and on every `PUT /users/{id}/status` (including one that sets the status the user already has, which also refreshes the expiry) |
+
+The database is the source of truth, and the cache is a copy. Writing to Redis is best effort: if Redis is unavailable the application logs a warning and the operation still succeeds, so an entry can be missing or briefly different from the database. Whoever reads it must treat a missing entry as a miss and read the database. See [ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md).
+
+Look at the entries:
+
+```bash
+docker exec redis redis-cli --scan --pattern 'user:status:*'
+```
+
 ## Application settings
 
 | Property | Environment variable | Default | Notes |
@@ -61,6 +75,7 @@ Its own settings and connections are kept in the volume `redisinsight-data`. The
 | `spring.data.redis.port` | `REDIS_PORT` | `6379` | |
 | `spring.data.redis.connect-timeout` | | `2s` | How long to wait to open a connection |
 | `spring.data.redis.timeout` | | `2s` | How long to wait for the answer to a command |
+| `app.cache.user-status-ttl` | | `1h` | How long a cached user status lives. It also bounds how stale an entry can be after a lost write. Must be greater than zero |
 
 The timeouts are short on purpose: when Redis is slow or gone, a request fails quickly instead of waiting on it.
 
@@ -75,10 +90,12 @@ With the application running against the local Redis:
 - The port from `REDIS_PORT` is applied, so the settings in `application.yml` are the ones in use.
 - Against a server that accepts the connection and never answers, the call gave up after about 2 seconds.
 - RedisInsight registered the database `local` (`redis:6379`) after the terms were accepted, connected to it, listed a key written with `redis-cli` and read its value.
+- Registering a user wrote `user:status:<id>` with the value `ACTIVE` and an expiry of 3600 seconds. Each of the three statuses, set in any order, reached the database, Redis and the response together. Setting the same status again refreshed the expiry (from 100 back to 3600 seconds). A rejected registration or an unknown user wrote nothing.
+- **With Redis stopped**, registering a user answered 201 in 23 ms and updating a status answered 200, with the right value in the database and a warning in the log. After Redis came back, that user had no cached status until the next update wrote it again.
 
 ## Defaults on purpose
 
-The Compose service has no password, no memory limit and no eviction policy, because what it will hold is not decided. When the first use is chosen:
+The Compose service has no password, no memory limit and no eviction policy, because the only use so far is a cache whose entries expire on their own, and other uses are not decided. As uses are added:
 
 - **A cache** (data that can be recomputed) should set `maxmemory` and an eviction policy such as `allkeys-lru`, so Redis drops old entries when memory is full.
 - **Data that must not disappear** (idempotency keys, state) must not be evicted. It also needs stronger persistence than the default snapshots, for example `appendonly yes`.
@@ -87,6 +104,6 @@ The data survives a restart of the container through the periodic snapshot Redis
 
 ## Known limitations
 
-- A feature that depends on Redis has to decide what to do when it fails: fail the request, or fall back to another source. Nothing decides this yet.
+- The cache of user status decides what to do when Redis fails by being best effort: the operation succeeds and a warning is logged. Any other feature that uses Redis has to decide for itself: fail the request, or fall back to another source.
 - One node, with no replication. There is no authentication and no TLS, so this is for local use only.
 - The application does not check the Redis connection at startup and has no health endpoint for it.

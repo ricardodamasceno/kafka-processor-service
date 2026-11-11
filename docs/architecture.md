@@ -34,7 +34,7 @@ What lives here: the entities and the rules that are always true, plus the **por
 | `domain.transaction.TransactionRepository` | Port: the contract for storing transactions. Defined here, implemented elsewhere |
 | `domain.user.User` | Entity: an immutable record. The name is trimmed and the email is trimmed and lower-cased, so two emails that differ only in case are the same user. Limits: name up to 200 characters, email up to 320 and in a valid format |
 | `domain.user.UserRepository` | Port: the contract for storing users and checking whether an email is taken |
-| `domain.user.UserStatus` | Enum: `ACTIVE`, `INACTIVE`, `BLOCKED`. Where a user is in their life. A new user is `ACTIVE` |
+| `domain.user.UserStatus` | Enum: `ACTIVE`, `INACTIVE`, `BLOCKED`. Where a user is in their life. A new user is `ACTIVE`. `User.withStatus` returns a copy of the user with another status, and any status can be set from any other |
 | `domain.shared.DomainValidationException` | Thrown when a domain rule is violated |
 
 Why: if a rule such as "an amount must be positive" lives in the entity, it is enforced no matter who creates a `Transaction` (an HTTP call, a Kafka consumer, a test).
@@ -49,7 +49,8 @@ What lives here: the operations the system supports. Each service orchestrates d
 | `application.transaction.TransactionEvent` | Something that happened to a transaction: a type, the complete state of the transaction, and an id that stays the same if the event is produced twice |
 | `application.transaction.TransactionEventType` | `TRANSACTION_CREATED`, `TRANSACTION_PROCESSING`, `TRANSACTION_COMPLETED`, `TRANSACTION_FAILED` |
 | `application.transaction.TransactionEventPublisher` | Outbound port: how the application announces a transaction event. Implemented by the Kafka adapter |
-| `application.user.UserService` | `register`: validates, assigns an id and the registration time (from the `Clock`), refuses an email that is already registered, and saves the user as `ACTIVE` |
+| `application.user.UserService` | `register`: validates, assigns an id and the registration time (from the `Clock`), refuses an email that is already registered, saves the user as `ACTIVE` and caches the status. `updateStatus`: sets any of the three statuses, from any status, and refreshes the cached status |
+| `application.user.UserStatusCache` | Outbound port: a fast copy of the status of each user, kept outside the database. Writing is best effort and must not throw. Implemented by the Redis adapter |
 | `application.shared.NotFoundException` | Thrown when a resource does not exist |
 | `application.shared.ConflictException` | Thrown when a request conflicts with what already exists, such as a registered email |
 | `application.shared.PublishFailedException` | Thrown when an event could not be published |
@@ -72,9 +73,10 @@ Adapters convert data between the format the inner layers use and the format an 
 | `TransactionRequest` | Input DTO (data transfer object) to create a transaction, with Bean Validation (`@NotNull`, `@NotBlank`, `@Positive`...). It carries the `userId` of the owner |
 | `TransactionUpdateRequest` | Input DTO to update a transaction. It has no `userId` and no status, because an update cannot change the owner or the status |
 | `TransactionResponse` | Output DTO. It includes the `userId` and the `status` |
-| `UserController` | `POST /users`: registers a user |
+| `UserController` | `POST /users` registers a user, and `PUT /users/{id}/status` sets its status |
 | `UserRequest` | Input DTO. It only checks that the fields are present; format and lengths are rules of the domain `User` |
 | `UserResponse` | Output DTO |
+| `UserStatusRequest` | Input DTO of `PUT /users/{id}/status`: only the `status`, which must be present and one of `ACTIVE`, `INACTIVE` or `BLOCKED` (uppercase) |
 | `ApiExceptionHandler` | Maps `NotFoundException` to 404, `ConflictException` to 409 and `DomainValidationException` to 400 |
 
 DTOs are separate from domain entities so the API contract and the domain model can change independently.
@@ -93,6 +95,13 @@ DTOs are separate from domain entities so the API contract and the domain model 
 Why two entity classes: JPA needs a no-arg constructor, annotations and a mutable shape. Keeping that out of the domain keeps the domain pure. The cost is the mapping step, which lives in the mapper classes so it can be tested on its own.
 
 Why `TransactionJpaRepository` needs no `@Repository`: it is only an interface. Spring Data JPA scans for interfaces that extend `JpaRepository` and creates the implementation at runtime (a proxy backed by `SimpleJpaRepository`, which uses the JPA `EntityManager` and Hibernate).
+
+**`adapter.cache`** (the driven side: Redis)
+
+| Class | Role |
+|---|---|
+| `RedisUserStatusCache` | Implements the `UserStatusCache` port. One entry per user: the key is `user:status:<userId>`, the value is the status name, and it expires after `app.cache.user-status-ttl`. A failure to reach Redis is logged as a warning and swallowed |
+| `CacheProperties` | The settings under `app.cache`, read from `application.yml` |
 
 **`adapter.messaging`** (Kafka: both driving and driven)
 
@@ -140,11 +149,26 @@ When the status changes later (`PROCESSING`, `COMPLETED` or `FAILED`), the same 
 3. The service creates a `User` (the domain trims and normalizes the data and checks its rules; a broken rule is a 400 with the reason) with a new id, the time from the `Clock` and the status `ACTIVE`. The status is not part of the request: a client cannot choose it, and a `status` field in the body is ignored.
 4. If the email is already registered, regardless of case, the service throws `ConflictException`, which is a **409**.
 5. `UserRepositoryAdapter` converts the `User` to a `UserJpaEntity` and saves it. If two requests with the same email pass step 4 at the same time, the unique index rejects the second one and the adapter reports it as the same `ConflictException`.
-6. The API answers **201 Created** with the user (`id`, `name`, `email`, `createdAt`, `status`). Unlike creating a transaction, the body carries the id, because registration is synchronous and the client needs the id to create transactions. There is no `Location` header.
+6. After the database write, `UserService` writes the status to the `UserStatusCache` (`user:status:<id>` in Redis). This is best effort: if Redis is unavailable the failure is logged and the registration still succeeds. A rejected registration (400 or 409) writes nothing to the cache.
+7. The API answers **201 Created** with the user (`id`, `name`, `email`, `createdAt`, `status`). Unlike creating a transaction, the body carries the id, because registration is synchronous and the client needs the id to create transactions. There is no `Location` header.
 
 ```bash
 curl -i -X POST http://localhost:8080/users -H "Content-Type: application/json" -d '{"name":"Alice Silva","email":"alice@example.com"}'
 ```
+
+`PUT /users/{id}/status`:
+
+1. `UserController` receives the JSON as a `UserStatusRequest`. The `status` must be present and one of `ACTIVE`, `INACTIVE` or `BLOCKED`, in uppercase. Anything else, a missing body or an `id` that is not a UUID is a **400**.
+2. It calls `UserService.updateStatus(id, status)`.
+3. The service loads the user (**404** if it does not exist), applies `User.withStatus` and saves it. Any status can be set from any other, and setting the status the user already has is accepted.
+4. The service writes the new status to the cache, which also refreshes its expiry (best effort, as in the registration).
+5. The API answers **200** with the user.
+
+```bash
+curl -i -X PUT http://localhost:8080/users/<id>/status -H "Content-Type: application/json" -d '{"status":"BLOCKED"}'
+```
+
+A user that is not `ACTIVE` cannot create transactions: `POST /transactions` answers 409. Creating a transaction still reads the status from the database, not from the cache. See [ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md).
 
 ## Lombok
 
@@ -176,14 +200,15 @@ The pagination limits come from `application.yml` instead of being hard-coded in
 | `app.pagination.max-page-size` | Upper bound for `size` |
 
 The values are bound to the `PaginationProperties` record (`@ConfigurationProperties`), which also keeps the clamping logic in one place instead of duplicating it in each controller. The controller base path (`/transactions`) is written directly in `@RequestMapping`.
-The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.max-retries`, `retry.interval`, `topics.*`), bound to `MessagingProperties`. The connection settings (`bootstrap-servers`, `acks=all`, idempotent producer, `auto-offset-reset: earliest`, manual commit per record) are under `spring.kafka`. The Redis connection (`host`, `port` and the timeouts) is under `spring.data.redis`; see [redis.md](redis.md).
+The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.max-retries`, `retry.interval`, `topics.*`), bound to `MessagingProperties`. The connection settings (`bootstrap-servers`, `acks=all`, idempotent producer, `auto-offset-reset: earliest`, manual commit per record) are under `spring.kafka`. The Redis connection (`host`, `port` and the timeouts) is under `spring.data.redis`; see [redis.md](redis.md). The cache settings (`user-status-ttl`) are under `app.cache`, bound to `CacheProperties`.
 
 ## Testing strategy
 
 - **Domain tests** (`TransactionTest`): pure Java, no Spring, no database.
 - **Mapper tests** (`TransactionMapperTest`): check that the conversion in both directions loses nothing.
 - **Service tests** (`TransactionServiceTest`): use `InMemoryTransactionRepository`, a test double that implements the port. This works because services depend on the interface, not on JPA. `TransactionServiceTest` also uses `InMemoryUserRepository`. They cover: a created transaction is `PENDING` and owned by the user, an unknown user and a user that is `INACTIVE` or `BLOCKED` store nothing, invalid data is rejected before the user is looked up, `update` keeps the owner and the status, `delete`, and paging.
-- **User tests** (`UserTest`, `UserServiceTest`, `UserMapperTest`): normalization, the name and email rules, a duplicated email regardless of case, nothing stored when the data is invalid, the registration time coming from a fixed `Clock`, and a new user being `ACTIVE`.
+- **User tests** (`UserTest`, `UserServiceTest`, `UserMapperTest`): normalization, the name and email rules, a duplicated email regardless of case, nothing stored when the data is invalid, the registration time coming from a fixed `Clock`, a new user being `ACTIVE`, any status being accepted from any other, the status written to the cache on registration and on every update, and nothing cached when a request is rejected.
+- **Cache tests** (`RedisUserStatusCacheTest`): the key, the value and the expiry written to Redis (checked with a recording stand-in, without a Redis server), that a failure to reach Redis is swallowed, and that the expiry must be greater than zero.
 - **Event tests** (`TransactionEventTest`): the event type follows the status, and the event id is the same for the same transaction and status.
 - **Translator tests** (`TransactionChangeTranslatorTest`): every rule of the translation table, plus the rejections: an update without the old row, a change without an operation, an incomplete row, and a row that breaks a domain rule.
 - **Message contract tests** (`JsonMessageCodecTest`, `TransactionEventMessageTest`): read an insert, an update and a delete in the shape Debezium publishes (including envelope fields the service ignores), reject malformed payloads and unknown enum values, and check the JSON of a transaction event.
@@ -201,7 +226,9 @@ The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.ma
 - Delivery is at-least-once, so the same event can be published twice. Its id is the same each time, so a consumer can ignore a duplicate. Order is kept inside each event topic but not between the two. A message in a DLQ needs a human or a job to look at it: there is no automatic reprocessing yet.
 - Paging is offset-based (`page` and `size`, size capped by `app.pagination.max-page-size`).
 - Identifiers are random UUIDs generated by the service.
-- Only an `ACTIVE` user can create a transaction, but nothing changes a user's status yet: there is no endpoint to block or deactivate a user. The status is checked only when a transaction is created, so blocking a user does not stop the transactions that are already `PENDING`.
+- Only an `ACTIVE` user can create a transaction. The status is checked only when a transaction is created, so blocking a user does not stop the transactions that are already `PENDING`.
+- `PUT /users/{id}/status` has no authentication and keeps no history of who changed a status or when, so anyone who can reach the API can block a user.
+- The cached user status is written but not read yet: creating a transaction still reads the status from the database. The cached value can be missing (Redis was down when the status changed, or the entry expired) or briefly different from the database, so a reader must treat a missing entry as a miss and fall back to the database. See [ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md).
 - `POST /users` has no authentication, so anyone can register. It answers 409 for an email that is already registered, which tells a caller that the email exists.
 - The user is checked and then the transaction is saved, in two steps. A user cannot be deleted through the API today, so nothing can remove the user in between, and the foreign key is the last line of defence.
 - A transaction cannot change owner: the owner is set at creation and `PUT` keeps it.
