@@ -10,6 +10,14 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  data:
+    redis:
+      # The local Redis of docker/docker-compose.yml
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # Fail fast when Redis is down, instead of leaving a request waiting on it
+      connect-timeout: 2s
+      timeout: 2s
   kafka:
     # External listeners of the local cluster (docker/docker-compose.yml)
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092,localhost:29092,localhost:39092}

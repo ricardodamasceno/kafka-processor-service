@@ -1,12 +1,12 @@
 # Local Kafka cluster
 
-Setup in `docker/` that starts a local development Kafka cluster and creates the project topics. The same Compose file also starts PostgreSQL (see [database.md](database.md)) and Kafka Connect with Debezium (see [debezium.md](debezium.md)).
+Setup in `docker/` that starts a local development Kafka cluster and creates the project topics. The same Compose file also starts PostgreSQL (see [database.md](database.md)) , Kafka Connect with Debezium (see [debezium.md](debezium.md)) and Redis (see [redis.md](redis.md)).
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `docker/docker-compose.yml` | Defines brokers, Schema Registry, Kafka UI, the topic creation job, PostgreSQL and Kafka Connect |
+| `docker/docker-compose.yml` | Defines brokers, Schema Registry, Kafka UI, the topic creation job, PostgreSQL, Kafka Connect and Redis |
 | `docker/create-topics.sh` | Idempotent script that creates the topics (`--if-not-exists`) |
 | `docker/debezium/cdc-connector.json` | Configuration of the Debezium connector: which tables are captured and how their topics are named |
 | `docker/register-connector.sh` | Registers (or updates) that connector in Kafka Connect |
@@ -23,6 +23,8 @@ Setup in `docker/` that starts a local development Kafka cluster and creates the
 | `kafka-init` | `apache/kafka:3.9.0` | n/a | Runs `create-topics.sh` and exits (code 0) |
 | `postgres` | `postgres:17` | 5432 | Runs with `wal_level=logical`. See [database.md](database.md) |
 | `kafka-connect` | `quay.io/debezium/connect:3.7.1.Final` | 8083 | Kafka Connect with the Debezium plugins. Waits for `kafka-init` and `postgres`. See [debezium.md](debezium.md) |
+| `redis` | `redis:7.4-alpine` | 6379 | In-memory key-value store, with a health check. See [redis.md](redis.md) |
+| `redisinsight` | `redis/redisinsight:3.8.0` | 5540 | Web interface for Redis. Waits for `redis` to be healthy. See [redis.md](redis.md) |
 
 The Compose project is named `events-processor`. Port 8080 is intentionally left free for the application service.
 
@@ -53,6 +55,8 @@ docker compose -f docker/docker-compose.yml ps -a
 - Schema Registry: http://localhost:8082.
 - Kafka UI: http://localhost:8081.
 - Kafka Connect REST API: http://localhost:8083.
+- Redis: `localhost:6379`.
+- RedisInsight (Redis web interface): http://localhost:5540.
 
 Each broker has two listeners: `INTERNAL` (port 9092, between containers) and `EXTERNAL` (port 19092/29092/39092, for the host). The `CONTROLLER` listener (9093) is used only by the KRaft quorum.
 

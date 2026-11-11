@@ -1,5 +1,5 @@
 # Local environment: Kafka cluster (3 KRaft brokers) + Schema Registry + Kafka UI + topic creation + PostgreSQL
-# + Kafka Connect with Debezium (change data capture of selected tables)
+# + Kafka Connect with Debezium (change data capture of selected tables) + Redis
 # Usage (from the project root): docker compose -f docker/docker-compose.yml up -d
 name: events-processor
 
@@ -146,5 +146,40 @@ services:
       retries: 12
       start_period: 30s
 
+  # In-memory key-value store. Defaults on purpose: no password, no memory limit and no eviction policy, because
+  # what it will hold is not decided yet (a cache can be evicted, other data cannot). Data survives a restart through
+  # the periodic snapshot Redis writes to /data.
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports: ["6379:6379"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Web interface for Redis, the same idea as Kafka UI for Kafka. Open http://localhost:5540.
+  # It reaches Redis by the service name (redis:6379), because it runs on the Compose network.
+  redisinsight:
+    image: redis/redisinsight:3.8.0
+    container_name: redisinsight
+    restart: unless-stopped
+    depends_on:
+      redis: {condition: service_healthy}
+    ports: ["5540:5540"]
+    environment:
+      # Registers the local Redis at startup, so there is nothing to add by hand in the interface
+      RI_REDIS_HOST: redis
+      RI_REDIS_PORT: 6379
+      RI_REDIS_ALIAS: local
+    volumes:
+      - redisinsight-data:/data
+
 volumes:
   postgres-data:
+  redis-data:
+  redisinsight-data:

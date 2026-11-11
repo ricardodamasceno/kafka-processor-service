@@ -176,7 +176,7 @@ The pagination limits come from `application.yml` instead of being hard-coded in
 | `app.pagination.max-page-size` | Upper bound for `size` |
 
 The values are bound to the `PaginationProperties` record (`@ConfigurationProperties`), which also keeps the clamping logic in one place instead of duplicating it in each controller. The controller base path (`/transactions`) is written directly in `@RequestMapping`.
-The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.max-retries`, `retry.interval`, `topics.*`), bound to `MessagingProperties`. The connection settings (`bootstrap-servers`, `acks=all`, idempotent producer, `auto-offset-reset: earliest`, manual commit per record) are under `spring.kafka`.
+The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.max-retries`, `retry.interval`, `topics.*`), bound to `MessagingProperties`. The connection settings (`bootstrap-servers`, `acks=all`, idempotent producer, `auto-offset-reset: earliest`, manual commit per record) are under `spring.kafka`. The Redis connection (`host`, `port` and the timeouts) is under `spring.data.redis`; see [redis.md](redis.md).
 
 ## Testing strategy
 
