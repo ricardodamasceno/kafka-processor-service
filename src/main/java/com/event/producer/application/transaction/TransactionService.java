@@ -75,6 +75,20 @@ public class TransactionService {
         return userIsActive ? ValidationOutcome.PROCESSING : ValidationOutcome.FAILED;
     }
 
+    /**
+     * Completes a transaction that was carried out: the last step of its life, from {@code PROCESSING} to
+     * {@code COMPLETED}. Returns whether it moved: {@code false} when the transaction does not exist or is not
+     * {@code PROCESSING}, for example because an earlier delivery of the same event already completed it.
+     * <p>
+     * Like the validation, the move is atomic and only happens from {@code PROCESSING}, so calling it twice is harmless.
+     */
+    public boolean complete(UUID transactionId) {
+        if (!TransactionStatus.PROCESSING.canMoveTo(TransactionStatus.COMPLETED)) {
+            throw new DomainValidationException("A transaction cannot move from PROCESSING to COMPLETED");
+        }
+        return repository.moveStatus(transactionId, TransactionStatus.PROCESSING, TransactionStatus.COMPLETED);
+    }
+
     public Transaction get(UUID id) {
         return repository.findById(id).orElseThrow(() -> notFound(id));
     }

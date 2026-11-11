@@ -86,7 +86,7 @@ Defined in the `TOPICS` variable of `docker/create-topics.sh`, in the format `na
 | `payments-transactions-create` | 6 | 3 | `TRANSACTION_CREATED` events, the work to do (key = transaction id). Published by the translator and read by the validation consumer (group `transaction-validator`) |
 | `payments-transactions-create-dlq` | 3 | 3 | Dead letter queue of the topic above: what the validation consumer could not process after its retries, or could not understand |
 | `payments-transactions-update` | 6 | 3 | `TRANSACTION_PROCESSING`, `TRANSACTION_COMPLETED` and `TRANSACTION_FAILED` events, facts about what happened (key = transaction id). Published by the translator; the notifier will read it |
-| `payments-transactions-update-dlq` | 3 | 3 | Dead letter queue of the topic above, for its future consumer |
+| `payments-transactions-update-dlq` | 3 | 3 | Dead letter queue of the topic above: what the movement recorder could not process after its retries, or could not understand |
 
 Topic names use hyphens as the only separator, with `-dlq` added for the dead letter queue of a topic. The topic of a table captured by change data capture is `<table>-cdc-events`.
 

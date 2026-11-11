@@ -21,6 +21,7 @@ Convention: a `docs/` folder at the project root, with architecture decisions re
 - [0006. Translate row changes into transaction events](adr/0006-translate-changes-into-transaction-events.md)
 - [0007. Cache the status of users in Redis](adr/0007-cache-the-status-of-users-in-redis.md)
 - [0008. Validate transactions in a consumer of the created events](adr/0008-validate-transactions-in-a-consumer-of-created-events.md)
+- [0009. Record movements in a consumer of the update events](adr/0009-record-movements-in-a-consumer-of-the-update-events.md)
 
 ## Rules
 

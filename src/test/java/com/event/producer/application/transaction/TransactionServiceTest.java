@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -169,6 +170,27 @@ class TransactionServiceTest {
                 .thenReturn(false);
 
         assertEquals(ValidationOutcome.NOT_PENDING, service.validate(transactionId, userId));
+        verify(repository, never()).save(any());
+    }
+
+    // complete
+
+    @Test
+    void aProcessingTransactionIsCompleted() {
+        UUID transactionId = UUID.randomUUID();
+        when(repository.moveStatus(transactionId, TransactionStatus.PROCESSING, TransactionStatus.COMPLETED))
+                .thenReturn(true);
+
+        assertTrue(service.complete(transactionId));
+    }
+
+    @Test
+    void aTransactionThatIsNotProcessingOrDoesNotExistIsNotCompleted() {
+        UUID transactionId = UUID.randomUUID();
+        when(repository.moveStatus(transactionId, TransactionStatus.PROCESSING, TransactionStatus.COMPLETED))
+                .thenReturn(false);
+
+        assertFalse(service.complete(transactionId));
         verify(repository, never()).save(any());
     }
 

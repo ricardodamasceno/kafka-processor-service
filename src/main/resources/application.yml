@@ -62,7 +62,9 @@ app:
       transactions-cdc-events: transactions-cdc-events
       transactions-cdc-events-dlq: transactions-cdc-events-dlq
       # Transaction events published by the translator: the work to do (create) and what happened (update).
-      # The creation events are read by the validation step, so that topic has a dead letter queue.
+      # Both are read by a consumer, so both have a dead letter queue: the creation events by the validation step,
+      # the update events by the step that records the movement of the money.
       transactions-create: payments-transactions-create
       transactions-create-dlq: payments-transactions-create-dlq
       transactions-update: payments-transactions-update
+      transactions-update-dlq: payments-transactions-update-dlq

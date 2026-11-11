@@ -28,7 +28,7 @@ Alternatives considered:
 
 ## Consequences
 
-- A transaction now leaves `PENDING` as `PROCESSING` or `FAILED`. **Nothing carries out a `PROCESSING` transaction yet**, so it stays there. That is the next stage.
+- A transaction now leaves `PENDING` as `PROCESSING` or `FAILED`. The next stage carries it out: the movement recorder ([ADR 0009](0009-record-movements-in-a-consumer-of-the-update-events.md)) records the movement and completes it.
 - **A client no longer learns synchronously that a user is not active.** It receives 202 and has to read the transaction to see `FAILED`. Together with the next point, it cannot tell why.
 - **A `FAILED` transaction records no reason.** Today the only reason is that the user is not active or does not exist, but it is not stored and not in the event. A reason is the natural next addition.
 - **The cached status is trusted, even when it is wrong.** If a user was blocked and the cache still says `ACTIVE`, for example because the write to Redis was lost, their transactions are moved to `PROCESSING` until the entry expires (one minute). This was accepted in ADR 0007. A rule that must never be wrong has to read the database.

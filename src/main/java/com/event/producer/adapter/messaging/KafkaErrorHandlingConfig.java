@@ -28,7 +28,8 @@ class KafkaErrorHandlingConfig {
         MessagingProperties.Topics topics = properties.topics();
         Map<String, String> dlqBySourceTopic = Map.of(
                 topics.transactionsCdcEvents(), topics.transactionsCdcEventsDlq(),
-                topics.transactionsCreate(), topics.transactionsCreateDlq());
+                topics.transactionsCreate(), topics.transactionsCreateDlq(),
+                topics.transactionsUpdate(), topics.transactionsUpdateDlq());
 
         // A negative partition lets Kafka choose it from the key, so the DLQ may have fewer partitions than the source.
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
