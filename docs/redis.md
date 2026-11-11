@@ -57,7 +57,7 @@ Its own settings and connections are kept in the volume `redisinsight-data`. The
 
 | Key | Value | Expires | Written when |
 |---|---|---|---|
-| `user:status:<userId>` | The status name: `ACTIVE`, `INACTIVE` or `BLOCKED` | After `app.cache.user-status-ttl` (1 hour) | A user is registered, and on every `PUT /users/{id}/status` (including one that sets the status the user already has, which also refreshes the expiry) |
+| `user:status:<userId>` | The status name: `ACTIVE`, `INACTIVE` or `BLOCKED` | After `app.cache.user-status-ttl` (1 minute) | A user is registered, and on every `PUT /users/{id}/status` (including one that sets the status the user already has, which also refreshes the expiry) |
 
 The database is the source of truth, and the cache is a copy. Writing to Redis is best effort: if Redis is unavailable the application logs a warning and the operation still succeeds, so an entry can be missing or briefly different from the database. Whoever reads it must treat a missing entry as a miss and read the database. See [ADR 0007](adr/0007-cache-the-status-of-users-in-redis.md).
 
@@ -75,7 +75,7 @@ docker exec redis redis-cli --scan --pattern 'user:status:*'
 | `spring.data.redis.port` | `REDIS_PORT` | `6379` | |
 | `spring.data.redis.connect-timeout` | | `2s` | How long to wait to open a connection |
 | `spring.data.redis.timeout` | | `2s` | How long to wait for the answer to a command |
-| `app.cache.user-status-ttl` | | `1h` | How long a cached user status lives. It also bounds how stale an entry can be after a lost write. Must be greater than zero |
+| `app.cache.user-status-ttl` | | `1m` | How long a cached user status lives. It also bounds how stale an entry can be after a lost write. Must be greater than zero |
 
 The timeouts are short on purpose: when Redis is slow or gone, a request fails quickly instead of waiting on it.
 
@@ -90,7 +90,7 @@ With the application running against the local Redis:
 - The port from `REDIS_PORT` is applied, so the settings in `application.yml` are the ones in use.
 - Against a server that accepts the connection and never answers, the call gave up after about 2 seconds.
 - RedisInsight registered the database `local` (`redis:6379`) after the terms were accepted, connected to it, listed a key written with `redis-cli` and read its value.
-- Registering a user wrote `user:status:<id>` with the value `ACTIVE` and an expiry of 3600 seconds. Each of the three statuses, set in any order, reached the database, Redis and the response together. Setting the same status again refreshed the expiry (from 100 back to 3600 seconds). A rejected registration or an unknown user wrote nothing.
+- Registering a user wrote `user:status:<id>` with the value `ACTIVE` and an expiry of 60 seconds, the configured minute. The entry expired on its own after that, while the user stayed in the database. Each of the three statuses, set in any order, reached the database, Redis and the response together. Setting the same status again refreshed the expiry (from 15 back to 60 seconds). A rejected registration or an unknown user wrote nothing.
 - **With Redis stopped**, registering a user answered 201 in 23 ms and updating a status answered 200, with the right value in the database and a warning in the log. After Redis came back, that user had no cached status until the next update wrote it again.
 
 ## Defaults on purpose

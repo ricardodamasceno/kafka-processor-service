@@ -49,7 +49,7 @@ app:
   cache:
     # How long the status of a user stays in Redis. It also bounds how stale it can be when an update
     # could not reach Redis (the database is always right).
-    user-status-ttl: 1h
+    user-status-ttl: 1m
   messaging:
     # How long to wait for Kafka to acknowledge an event before the publication counts as failed
     send-timeout: 5s
