@@ -15,3 +15,8 @@ CREATE UNIQUE INDEX uq_movements_transaction_id_type ON movements (transaction_i
 
 -- Typical access pattern: the movements of a user over time.
 CREATE INDEX idx_movements_user_id_created_at ON movements (user_id, created_at);
+
+-- The table is captured by Debezium (see docs/debezium.md).
+-- REPLICA IDENTITY FULL makes PostgreSQL write the whole old row to the WAL on UPDATE and DELETE, so the change
+-- events carry a complete "before" image. The default only logs the primary key of the old row.
+ALTER TABLE movements REPLICA IDENTITY FULL;

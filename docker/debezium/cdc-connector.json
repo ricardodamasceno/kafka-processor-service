@@ -12,7 +12,7 @@
   "slot.name": "cdc_slot",
   "publication.name": "cdc_publication",
   "publication.autocreate.mode": "filtered",
-  "table.include.list": "public.transactions",
+  "table.include.list": "public.transactions,public.movements",
 
   "snapshot.mode": "no_data",
   "tombstones.on.delete": "false",
