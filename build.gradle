@@ -23,6 +23,11 @@ repositories {
     mavenCentral()
 }
 
+// Mockito runs as a Java agent, as the JDK recommends (attaching it at run time is deprecated).
+configurations {
+    mockitoAgent
+}
+
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -39,10 +44,14 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:6.0.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // Mocks for the ports in the tests of the services. The version is managed by Spring Boot.
+    testImplementation 'org.mockito:mockito-junit-jupiter'
+    mockitoAgent('org.mockito:mockito-core') { transitive = false }
 }
 
 test {
     useJUnitPlatform()
+    jvmArgs "-javaagent:${configurations.mockitoAgent.asPath}"
 }
 
 // Flyway: migrations run only when you execute `./gradlew flywayMigrate`.

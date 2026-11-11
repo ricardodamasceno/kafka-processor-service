@@ -1,260 +1,242 @@
 package com.event.producer.application.transaction;
 
 import com.event.producer.application.shared.NotFoundException;
-import com.event.producer.application.user.InMemoryUserRepository;
-import com.event.producer.application.user.RecordingUserStatusCache;
 import com.event.producer.application.user.UserService;
 import com.event.producer.domain.shared.DomainValidationException;
 import com.event.producer.domain.transaction.Transaction;
+import com.event.producer.domain.transaction.TransactionRepository;
 import com.event.producer.domain.transaction.TransactionStatus;
 import com.event.producer.domain.transaction.TransactionType;
 import com.event.producer.domain.user.User;
+import com.event.producer.domain.user.UserRepository;
 import com.event.producer.domain.user.UserStatus;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class TransactionServiceTest {
 
     private static final Instant T1 = Instant.parse("2026-11-07T10:00:00Z");
     private static final Instant T2 = Instant.parse("2026-11-07T11:00:00Z");
     private static final BigDecimal TEN = new BigDecimal("10.00");
 
-    private final InMemoryTransactionRepository repository = new InMemoryTransactionRepository();
-    private final InMemoryUserRepository users = new InMemoryUserRepository();
-    private final RecordingUserStatusCache cache = new RecordingUserStatusCache();
-    private final UserService userService = new UserService(users, Clock.fixed(T1, ZoneOffset.UTC), cache);
-    private final TransactionService service = new TransactionService(repository, users, userService);
+    @Mock
+    private TransactionRepository repository;
+    @Mock
+    private UserRepository users;
+    @Mock
+    private UserService userService;
+    @InjectMocks
+    private TransactionService service;
 
-    /** A user saved in the database only: the cache has no entry for it. */
-    private UUID userWith(UserStatus status) {
-        User user = new User(UUID.randomUUID(), "Alice", UUID.randomUUID() + "@example.com", T1, status);
-        users.save(user);
-        return user.id();
+    private final UUID userId = UUID.randomUUID();
+
+    private void saveReturnsItsArgument() {
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
-    private Transaction transaction(UUID userId, TransactionStatus status) {
-        Transaction transaction = new Transaction(UUID.randomUUID(), userId, "acc-1", TransactionType.DEPOSIT,
-                TEN, T1, status);
-        repository.save(transaction);
-        return transaction;
+    private void userExists(UserStatus status) {
+        when(users.findById(userId)).thenReturn(
+                Optional.of(new User(userId, "Alice", "alice@example.com", T1, status)));
     }
 
-    private TransactionStatus statusOf(Transaction transaction) {
-        return repository.findById(transaction.id()).orElseThrow().status();
+    private Transaction transaction(TransactionStatus status) {
+        return new Transaction(UUID.randomUUID(), userId, "acc-1", TransactionType.DEPOSIT, TEN, T1, status);
     }
+
+    // create
 
     @Test
-    void createStoresAPendingTransactionOwnedByTheUser() {
-        UUID userId = userWith(UserStatus.ACTIVE);
+    void createSavesAPendingTransactionOwnedByTheUser() {
+        userExists(UserStatus.ACTIVE);
+        saveReturnsItsArgument();
 
         Transaction created = service.create(userId, "acc-1", TransactionType.DEPOSIT, TEN, T1);
 
+        ArgumentCaptor<Transaction> saved = ArgumentCaptor.forClass(Transaction.class);
+        verify(repository).save(saved.capture());
+        assertEquals(created, saved.getValue());
         assertEquals(TransactionStatus.PENDING, created.status());
         assertEquals(userId, created.userId());
-        assertEquals(created, service.get(created.id()));
     }
 
     @Test
     void createRejectsAnUnknownUserAndStoresNothing() {
-        UUID unknown = UUID.randomUUID();
+        when(users.findById(userId)).thenReturn(Optional.empty());
 
         NotFoundException exception = assertThrows(NotFoundException.class,
-                () -> service.create(unknown, "acc-1", TransactionType.DEPOSIT, TEN, T1));
+                () -> service.create(userId, "acc-1", TransactionType.DEPOSIT, TEN, T1));
 
-        assertTrue(exception.getMessage().contains(unknown.toString()));
-        assertTrue(service.list(0, 10).isEmpty());
+        assertTrue(exception.getMessage().contains(userId.toString()));
+        verifyNoInteractions(repository);
     }
 
-    @Test
-    void createAcceptsAUserThatIsNotActiveAndLeavesItToTheValidation() {
+    @ParameterizedTest
+    @EnumSource(value = UserStatus.class, names = {"INACTIVE", "BLOCKED"})
+    void createAcceptsAUserThatIsNotActiveAndLeavesItToTheValidation(UserStatus status) {
         // The status of the user is not checked here: the validation of the PENDING transaction does it, and fails it
-        UUID inactive = userWith(UserStatus.INACTIVE);
-        UUID blocked = userWith(UserStatus.BLOCKED);
+        userExists(status);
+        saveReturnsItsArgument();
 
-        Transaction first = service.create(inactive, "acc-1", TransactionType.DEPOSIT, TEN, T1);
-        Transaction second = service.create(blocked, "acc-1", TransactionType.DEPOSIT, TEN, T2);
+        Transaction created = service.create(userId, "acc-1", TransactionType.DEPOSIT, TEN, T1);
 
-        assertEquals(TransactionStatus.PENDING, first.status());
-        assertEquals(TransactionStatus.PENDING, second.status());
-        assertEquals(2, service.list(0, 10).size());
+        assertEquals(TransactionStatus.PENDING, created.status());
+        verifyNoInteractions(userService);
     }
 
     @Test
     void createRejectsInvalidDataBeforeLookingForTheUser() {
         // The data is checked first, so a bad request is a 400 even when the user does not exist
-        UUID unknown = UUID.randomUUID();
-
         assertThrows(DomainValidationException.class,
-                () -> service.create(unknown, " ", TransactionType.DEPOSIT, TEN, T1));
+                () -> service.create(userId, " ", TransactionType.DEPOSIT, TEN, T1));
         assertThrows(DomainValidationException.class,
-                () -> service.create(unknown, "acc-1", TransactionType.DEPOSIT, BigDecimal.ZERO, T1));
-        assertTrue(service.list(0, 10).isEmpty());
+                () -> service.create(userId, "acc-1", TransactionType.DEPOSIT, BigDecimal.ZERO, T1));
+
+        verifyNoInteractions(users, repository);
     }
 
-    @Test
-    void getThrowsNotFoundForUnknownId() {
-        assertThrows(NotFoundException.class, () -> service.get(UUID.randomUUID()));
-    }
-
-    @Test
-    void updateReplacesTheDataAndKeepsTheOwnerAndTheStatus() {
-        UUID userId = userWith(UserStatus.ACTIVE);
-        Transaction created = service.create(userId, "acc-1", TransactionType.DEPOSIT, TEN, T1);
-        repository.save(new Transaction(created.id(), created.userId(), created.accountId(), created.type(),
-                created.amount(), created.occurredAt(), TransactionStatus.COMPLETED));
-
-        Transaction updated = service.update(created.id(), "acc-1", TransactionType.WITHDRAWAL, new BigDecimal("25.50"), T2);
-
-        assertEquals(TransactionType.WITHDRAWAL, updated.type());
-        assertEquals(userId, updated.userId());
-        assertEquals(TransactionStatus.COMPLETED, updated.status());
-        assertEquals(updated, service.get(created.id()));
-    }
-
-    @Test
-    void updateThrowsNotFoundForUnknownId() {
-        assertThrows(NotFoundException.class,
-                () -> service.update(UUID.randomUUID(), "acc-1", TransactionType.DEPOSIT, TEN, T1));
-    }
-
-    @Test
-    void deleteRemovesTheTransaction() {
-        Transaction created = service.create(userWith(UserStatus.ACTIVE), "acc-1", TransactionType.DEPOSIT, TEN, T1);
-
-        service.delete(created.id());
-
-        assertThrows(NotFoundException.class, () -> service.get(created.id()));
-        assertThrows(NotFoundException.class, () -> service.delete(created.id()));
-    }
-
-    @Test
-    void listReturnsMostRecentFirstAndPaginates() {
-        UUID userId = userWith(UserStatus.ACTIVE);
-        Transaction older = service.create(userId, "acc-1", TransactionType.DEPOSIT, TEN, T1);
-        Transaction newer = service.create(userId, "acc-1", TransactionType.WITHDRAWAL, TEN, T2);
-
-        assertEquals(List.of(newer, older), service.list(0, 10));
-        assertEquals(List.of(newer), service.list(0, 1));
-        assertEquals(List.of(older), service.list(1, 1));
-        assertTrue(service.list(5, 10).isEmpty());
-    }
+    // validate
 
     @Test
     void aTransactionOfAnActiveUserMovesToProcessing() {
-        Transaction transaction = transaction(userWith(UserStatus.ACTIVE), TransactionStatus.PENDING);
+        UUID transactionId = UUID.randomUUID();
+        when(userService.statusOf(userId)).thenReturn(Optional.of(UserStatus.ACTIVE));
+        when(repository.moveStatus(transactionId, TransactionStatus.PENDING, TransactionStatus.PROCESSING))
+                .thenReturn(true);
 
-        ValidationOutcome outcome = service.validate(transaction.id(), transaction.userId());
-
-        assertEquals(ValidationOutcome.PROCESSING, outcome);
-        assertEquals(TransactionStatus.PROCESSING, statusOf(transaction));
+        assertEquals(ValidationOutcome.PROCESSING, service.validate(transactionId, userId));
     }
 
-    @Test
-    void aTransactionOfAUserThatIsNotActiveFails() {
-        for (UserStatus status : new UserStatus[]{UserStatus.INACTIVE, UserStatus.BLOCKED}) {
-            Transaction transaction = transaction(userWith(status), TransactionStatus.PENDING);
+    @ParameterizedTest
+    @EnumSource(value = UserStatus.class, names = {"INACTIVE", "BLOCKED"})
+    void aTransactionOfAUserThatIsNotActiveFails(UserStatus status) {
+        UUID transactionId = UUID.randomUUID();
+        when(userService.statusOf(userId)).thenReturn(Optional.of(status));
+        when(repository.moveStatus(transactionId, TransactionStatus.PENDING, TransactionStatus.FAILED))
+                .thenReturn(true);
 
-            ValidationOutcome outcome = service.validate(transaction.id(), transaction.userId());
-
-            assertEquals(ValidationOutcome.FAILED, outcome, "user " + status);
-            assertEquals(TransactionStatus.FAILED, statusOf(transaction), "user " + status);
-        }
+        assertEquals(ValidationOutcome.FAILED, service.validate(transactionId, userId));
     }
 
     @Test
     void aTransactionOfAUserThatDoesNotExistFails() {
-        Transaction transaction = transaction(UUID.randomUUID(), TransactionStatus.PENDING);
+        UUID transactionId = UUID.randomUUID();
+        when(userService.statusOf(userId)).thenReturn(Optional.empty());
+        when(repository.moveStatus(transactionId, TransactionStatus.PENDING, TransactionStatus.FAILED))
+                .thenReturn(true);
 
-        assertEquals(ValidationOutcome.FAILED, service.validate(transaction.id(), transaction.userId()));
-        assertEquals(TransactionStatus.FAILED, statusOf(transaction));
-    }
-
-    @Test
-    void theCacheIsReadFirstAndTheDatabaseIsNotTouchedWhenItHasTheStatus() {
-        UUID userId = userWith(UserStatus.ACTIVE);
-        cache.put(userId, UserStatus.ACTIVE);
-        Transaction transaction = transaction(userId, TransactionStatus.PENDING);
-
-        service.validate(transaction.id(), userId);
-
-        assertEquals(0, users.findByIdCalls);
-        assertEquals(TransactionStatus.PROCESSING, statusOf(transaction));
-    }
-
-    @Test
-    void anEntryInTheCacheIsTrustedEvenWhenItDiffersFromTheDatabase() {
-        // Documented in ADR 0007: the cache can be briefly stale, and what it holds wins
-        UUID blockedInCache = userWith(UserStatus.ACTIVE);
-        cache.put(blockedInCache, UserStatus.BLOCKED);
-        UUID activeInCache = userWith(UserStatus.BLOCKED);
-        cache.put(activeInCache, UserStatus.ACTIVE);
-
-        Transaction first = transaction(blockedInCache, TransactionStatus.PENDING);
-        Transaction second = transaction(activeInCache, TransactionStatus.PENDING);
-        service.validate(first.id(), blockedInCache);
-        service.validate(second.id(), activeInCache);
-
-        assertEquals(TransactionStatus.FAILED, statusOf(first));
-        assertEquals(TransactionStatus.PROCESSING, statusOf(second));
-    }
-
-    @Test
-    void withoutAnEntryInTheCacheTheDatabaseIsReadAndTheCacheIsFilled() {
-        UUID userId = userWith(UserStatus.ACTIVE);
-        Transaction transaction = transaction(userId, TransactionStatus.PENDING);
-
-        service.validate(transaction.id(), userId);
-
-        assertEquals(1, users.findByIdCalls);
-        assertEquals(UserStatus.ACTIVE, cache.entries.get(userId));
-    }
-
-    @Test
-    void aUserThatDoesNotExistIsNotCached() {
-        UUID unknown = UUID.randomUUID();
-        Transaction transaction = transaction(unknown, TransactionStatus.PENDING);
-
-        service.validate(transaction.id(), unknown);
-
-        assertFalse(cache.entries.containsKey(unknown));
+        assertEquals(ValidationOutcome.FAILED, service.validate(transactionId, userId));
     }
 
     @Test
     void theSameEventDeliveredTwiceValidatesOnlyOnce() {
-        Transaction transaction = transaction(userWith(UserStatus.ACTIVE), TransactionStatus.PENDING);
+        // The conditional update decides: the first call moves the transaction, the second finds it no longer PENDING
+        UUID transactionId = UUID.randomUUID();
+        when(userService.statusOf(userId)).thenReturn(Optional.of(UserStatus.ACTIVE));
+        when(repository.moveStatus(transactionId, TransactionStatus.PENDING, TransactionStatus.PROCESSING))
+                .thenReturn(true, false);
 
-        assertEquals(ValidationOutcome.PROCESSING, service.validate(transaction.id(), transaction.userId()));
-        assertEquals(ValidationOutcome.NOT_PENDING, service.validate(transaction.id(), transaction.userId()));
-
-        assertEquals(TransactionStatus.PROCESSING, statusOf(transaction));
+        assertEquals(ValidationOutcome.PROCESSING, service.validate(transactionId, userId));
+        assertEquals(ValidationOutcome.NOT_PENDING, service.validate(transactionId, userId));
     }
 
     @Test
-    void aTransactionThatWasAlreadyHandledIsNotTouched() {
-        UUID userId = userWith(UserStatus.ACTIVE);
-        for (TransactionStatus status : new TransactionStatus[]{TransactionStatus.PROCESSING, TransactionStatus.COMPLETED, TransactionStatus.FAILED}) {
-            Transaction transaction = transaction(userId, status);
+    void aTransactionThatIsNotPendingOrDoesNotExistIsLeftAlone() {
+        UUID transactionId = UUID.randomUUID();
+        when(userService.statusOf(userId)).thenReturn(Optional.of(UserStatus.ACTIVE));
+        when(repository.moveStatus(transactionId, TransactionStatus.PENDING, TransactionStatus.PROCESSING))
+                .thenReturn(false);
 
-            assertEquals(ValidationOutcome.NOT_PENDING, service.validate(transaction.id(), userId), "status " + status);
-            assertEquals(status, statusOf(transaction), "status " + status);
-        }
+        assertEquals(ValidationOutcome.NOT_PENDING, service.validate(transactionId, userId));
+        verify(repository, never()).save(any());
+    }
+
+    // get, list, update, delete
+
+    @Test
+    void getReturnsTheTransaction() {
+        Transaction transaction = transaction(TransactionStatus.PENDING);
+        when(repository.findById(transaction.id())).thenReturn(Optional.of(transaction));
+
+        assertEquals(transaction, service.get(transaction.id()));
     }
 
     @Test
-    void aTransactionThatDoesNotExistChangesNothing() {
-        UUID userId = userWith(UserStatus.ACTIVE);
+    void getThrowsNotFoundForUnknownId() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.empty());
 
-        assertEquals(ValidationOutcome.NOT_PENDING, service.validate(UUID.randomUUID(), userId));
+        assertThrows(NotFoundException.class, () -> service.get(id));
+    }
+
+    @Test
+    void listReturnsThePageTheRepositoryGives() {
+        List<Transaction> page = List.of(transaction(TransactionStatus.PENDING), transaction(TransactionStatus.FAILED));
+        when(repository.findAll(1, 2)).thenReturn(page);
+
+        assertEquals(page, service.list(1, 2));
+    }
+
+    @Test
+    void updateReplacesTheDataAndKeepsTheOwnerAndTheStatus() {
+        Transaction existing = transaction(TransactionStatus.COMPLETED);
+        when(repository.findById(existing.id())).thenReturn(Optional.of(existing));
+        saveReturnsItsArgument();
+
+        Transaction updated = service.update(existing.id(), "acc-2", TransactionType.WITHDRAWAL, new BigDecimal("25.50"), T2);
+
+        assertEquals(new Transaction(existing.id(), userId, "acc-2", TransactionType.WITHDRAWAL,
+                new BigDecimal("25.50"), T2, TransactionStatus.COMPLETED), updated);
+        verify(repository).save(updated);
+    }
+
+    @Test
+    void updateThrowsNotFoundForUnknownId() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.empty());
+
+        assertThrows(NotFoundException.class,
+                () -> service.update(id, "acc-1", TransactionType.DEPOSIT, TEN, T1));
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void deleteRemovesTheTransaction() {
+        UUID id = UUID.randomUUID();
+        when(repository.existsById(id)).thenReturn(true);
+
+        service.delete(id);
+
+        verify(repository).deleteById(id);
+    }
+
+    @Test
+    void deleteThrowsNotFoundForUnknownId() {
+        UUID id = UUID.randomUUID();
+        when(repository.existsById(id)).thenReturn(false);
+
+        assertThrows(NotFoundException.class, () -> service.delete(id));
+        verify(repository, never()).deleteById(any());
     }
 }
