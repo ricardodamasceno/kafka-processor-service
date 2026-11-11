@@ -59,10 +59,11 @@ class TransactionChangeTranslator {
     }
 
     private static Transaction toTransaction(TransactionChangeMessage.Row row) {
-        if (row.id() == null || row.accountId() == null || row.type() == null || row.amount() == null
-                || row.occurredAt() == null || row.status() == null) {
+        if (row.id() == null || row.userId() == null || row.accountId() == null || row.type() == null
+                || row.amount() == null || row.occurredAt() == null || row.status() == null) {
             throw new InvalidMessageException("Incomplete transaction row: " + row, null);
         }
-        return new Transaction(row.id(), row.accountId(), row.type(), row.amount(), row.occurredAt(), row.status());
+        return new Transaction(row.id(), row.userId(), row.accountId(), row.type(), row.amount(),
+                row.occurredAt(), row.status());
     }
 }

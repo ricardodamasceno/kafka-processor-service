@@ -20,14 +20,14 @@ import java.util.UUID;
 public record TransactionEventMessage(String eventId, TransactionEventType type, TransactionData transaction) {
 
     /** The complete state of the transaction when the event happened. */
-    public record TransactionData(UUID id, String accountId, TransactionType type, BigDecimal amount,
+    public record TransactionData(UUID id, UUID userId, String accountId, TransactionType type, BigDecimal amount,
                                   Instant occurredAt, TransactionStatus status) {
     }
 
     static TransactionEventMessage from(TransactionEvent event) {
         Transaction transaction = event.transaction();
         return new TransactionEventMessage(event.id(), event.type(), new TransactionData(
-                transaction.id(), transaction.accountId(), transaction.type(), transaction.amount(),
-                transaction.occurredAt(), transaction.status()));
+                transaction.id(), transaction.userId(), transaction.accountId(), transaction.type(),
+                transaction.amount(), transaction.occurredAt(), transaction.status()));
     }
 }

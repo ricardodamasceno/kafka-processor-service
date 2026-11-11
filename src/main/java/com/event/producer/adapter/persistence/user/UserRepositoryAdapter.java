@@ -7,6 +7,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 
+import java.util.Optional;
+import java.util.UUID;
+
 /**
  * Implements the domain port {@link UserRepository} using Spring Data JPA.
  * The conversion between domain and database objects is delegated to {@link UserMapper}.
@@ -30,6 +33,11 @@ class UserRepositoryAdapter implements UserRepository {
             }
             throw e;
         }
+    }
+
+    @Override
+    public Optional<User> findById(UUID id) {
+        return jpaRepository.findById(id).map(UserMapper::toDomain);
     }
 
     @Override

@@ -7,9 +7,11 @@ import jakarta.validation.constraints.Positive;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.UUID;
 
-/** JSON body received by the API to create or update a transaction. */
+/** JSON body received by the API to create a transaction. {@code userId} is the user who owns it. */
 public record TransactionRequest(
+        @NotNull UUID userId,
         @NotBlank String accountId,
         @NotNull TransactionType type,
         @NotNull @Positive BigDecimal amount,

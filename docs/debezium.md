@@ -140,7 +140,7 @@ Topics are not created automatically, so the topic must exist before the first c
 - **Delivery is at-least-once.** After a crash the connector can publish a change twice, so consumers must be idempotent.
 - **A stopped connector makes PostgreSQL retain WAL.** If Connect stays down for a long time the disk can fill up. Watch the retained WAL with the query above.
 - **Every column of a captured table goes to Kafka.** For sensitive columns use `column.exclude.list` in the connector configuration.
-- **Adding a column to a captured table needs no change to the connector.** It keeps running, and the new column appears in the messages from then on (checked by adding `user_id` while the connector was running). Messages published before the change do not have it. The translator ignores the columns it does not read.
+- **Adding a column to a captured table needs no change to the connector.** It keeps running, and the new column appears in the messages from then on (checked by adding `user_id` while the connector was running). Messages published before the change do not have it. The translator ignores the columns it does not read, but it **does read `user_id`**: a change published before that column existed is rejected and goes to the dead letter queue if it is ever read again (for example by a new consumer group that starts from the beginning).
 - **Changing the configuration:** edit `cdc-connector.json` and run the registration script again.
 - **Removing the connector:** deleting it does not drop the replication slot. Drop it by hand, otherwise PostgreSQL keeps retaining WAL:
 

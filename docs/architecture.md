@@ -28,7 +28,7 @@ What lives here: the entities and the rules that are always true, plus the **por
 
 | Class | Role |
 |---|---|
-| `domain.transaction.Transaction` | Entity: an immutable record that validates itself in the constructor. Money is `BigDecimal`, amount is always positive with at most 2 decimals |
+| `domain.transaction.Transaction` | Entity: an immutable record that validates itself in the constructor. It belongs to a user (`userId`). Money is `BigDecimal`, amount is always positive with at most 2 decimals |
 | `domain.transaction.TransactionType` | Enum: `DEPOSIT`, `WITHDRAWAL` |
 | `domain.transaction.TransactionStatus` | Enum: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`. Where a transaction is in its life |
 | `domain.transaction.TransactionRepository` | Port: the contract for storing transactions. Defined here, implemented elsewhere |
@@ -45,7 +45,7 @@ What lives here: the operations the system supports. Each service orchestrates d
 
 | Class | Role |
 |---|---|
-| `application.transaction.TransactionService` | `create`, `get`, `list`, `update`, `delete` for transactions |
+| `application.transaction.TransactionService` | `create`, `get`, `list`, `update`, `delete` for transactions. `create` checks that the user exists and is `ACTIVE`, through the `UserRepository` port |
 | `application.transaction.TransactionEvent` | Something that happened to a transaction: a type, the complete state of the transaction, and an id that stays the same if the event is produced twice |
 | `application.transaction.TransactionEventType` | `TRANSACTION_CREATED`, `TRANSACTION_PROCESSING`, `TRANSACTION_COMPLETED`, `TRANSACTION_FAILED` |
 | `application.transaction.TransactionEventPublisher` | Outbound port: how the application announces a transaction event. Implemented by the Kafka adapter |
@@ -69,8 +69,9 @@ Adapters convert data between the format the inner layers use and the format an 
 | Class | Role |
 |---|---|
 | `TransactionController` | Receives HTTP, calls a service, returns HTTP. No business rule |
-| `TransactionRequest` | Input DTO (data transfer object) with Bean Validation (`@NotBlank`, `@Positive`...) |
-| `TransactionResponse` | Output DTO |
+| `TransactionRequest` | Input DTO (data transfer object) to create a transaction, with Bean Validation (`@NotNull`, `@NotBlank`, `@Positive`...). It carries the `userId` of the owner |
+| `TransactionUpdateRequest` | Input DTO to update a transaction. It has no `userId` and no status, because an update cannot change the owner or the status |
+| `TransactionResponse` | Output DTO. It includes the `userId` and the `status` |
 | `UserController` | `POST /users`: registers a user |
 | `UserRequest` | Input DTO. It only checks that the fields are present; format and lengths are rules of the domain `User` |
 | `UserResponse` | Output DTO |
@@ -120,16 +121,17 @@ Consumer group: `transaction-event-translator`. All instances of the application
 `POST /transactions`:
 
 1. `TransactionController` receives the JSON as a `TransactionRequest` and validates its format.
-2. It calls `TransactionService.create(accountId, type, amount, occurredAt)`.
-3. The service creates a `Transaction` with an id and the status `PENDING` (the domain validates its rules) and saves it through the `TransactionRepository` port.
-4. `TransactionRepositoryAdapter` converts the `Transaction` to a `TransactionJpaEntity` and saves it.
-5. The API answers **202 Accepted** with an empty body (no id and no `Location` header). The row is already in the database, so `GET /transactions/{id}` returns 200 straight away, with the status `PENDING`. Since the response does not carry the id, a client finds the record with `GET /transactions` (most recent first).
-6. Debezium reads the insert from the PostgreSQL write-ahead log and publishes the change to `transactions-cdc-events`.
-7. `TransactionChangeConsumer` reads the change, `TransactionChangeTranslator` turns it into a `TRANSACTION_CREATED` event (the complete state of the transaction, with the event id `<transactionId>:PENDING`), and `TransactionEventKafkaPublisher` publishes it to `payments-transactions-create` with the transaction id as key. Nothing reads that topic yet, so nothing moves the transaction past `PENDING`.
+2. It calls `TransactionService.create(userId, accountId, type, amount, occurredAt)`.
+3. The service creates a `Transaction` with an id and the status `PENDING`. The domain validates its rules first, so invalid data is a **400** whatever the user.
+4. The service looks for the user through the `UserRepository` port. If the user does not exist it throws `NotFoundException` (**404**). If the user is not `ACTIVE` it throws `ConflictException` (**409**), and nothing is saved.
+5. `TransactionRepositoryAdapter` converts the `Transaction` to a `TransactionJpaEntity` and saves it.
+6. The API answers **202 Accepted** with an empty body (no id and no `Location` header). The row is already in the database, so `GET /transactions/{id}` returns 200 straight away, with the status `PENDING`. Since the response does not carry the id, a client finds the record with `GET /transactions` (most recent first).
+7. Debezium reads the insert from the PostgreSQL write-ahead log and publishes the change to `transactions-cdc-events`.
+8. `TransactionChangeConsumer` reads the change, `TransactionChangeTranslator` turns it into a `TRANSACTION_CREATED` event (the complete state of the transaction, including the `userId`, with the event id `<transactionId>:PENDING`), and `TransactionEventKafkaPublisher` publishes it to `payments-transactions-create` with the transaction id as key. Nothing reads that topic yet, so nothing moves the transaction past `PENDING`.
 
 When the status changes later (`PROCESSING`, `COMPLETED` or `FAILED`), the same path publishes the matching event to `payments-transactions-update`. A change that does not alter the status, such as a `PUT` that only changes the amount, and a delete produce no event.
 
-`GET`, `PUT` and `DELETE` go straight to the database. Every change to the table, including these, is published to `transactions-cdc-events`. `PUT` keeps the current status, because the request does not carry it.
+`GET`, `PUT` and `DELETE` go straight to the database. Every change to the table, including these, is published to `transactions-cdc-events`. `PUT` keeps the current owner and status, because the request does not carry them: a `userId` sent in a `PUT` body is ignored.
 
 `POST /users`:
 
@@ -180,7 +182,7 @@ The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.ma
 
 - **Domain tests** (`TransactionTest`): pure Java, no Spring, no database.
 - **Mapper tests** (`TransactionMapperTest`): check that the conversion in both directions loses nothing.
-- **Service tests** (`TransactionServiceTest`): use `InMemoryTransactionRepository`, a test double that implements the port. This works because services depend on the interface, not on JPA. They cover: a created transaction is `PENDING`, invalid data stores nothing, `update` keeps the status, `delete`, and paging.
+- **Service tests** (`TransactionServiceTest`): use `InMemoryTransactionRepository`, a test double that implements the port. This works because services depend on the interface, not on JPA. `TransactionServiceTest` also uses `InMemoryUserRepository`. They cover: a created transaction is `PENDING` and owned by the user, an unknown user and a user that is `INACTIVE` or `BLOCKED` store nothing, invalid data is rejected before the user is looked up, `update` keeps the owner and the status, `delete`, and paging.
 - **User tests** (`UserTest`, `UserServiceTest`, `UserMapperTest`): normalization, the name and email rules, a duplicated email regardless of case, nothing stored when the data is invalid, the registration time coming from a fixed `Clock`, and a new user being `ACTIVE`.
 - **Event tests** (`TransactionEventTest`): the event type follows the status, and the event id is the same for the same transaction and status.
 - **Translator tests** (`TransactionChangeTranslatorTest`): every rule of the translation table, plus the rejections: an update without the old row, a change without an operation, an incomplete row, and a row that breaks a domain rule.
@@ -199,6 +201,7 @@ The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.ma
 - Delivery is at-least-once, so the same event can be published twice. Its id is the same each time, so a consumer can ignore a duplicate. Order is kept inside each event topic but not between the two. A message in a DLQ needs a human or a job to look at it: there is no automatic reprocessing yet.
 - Paging is offset-based (`page` and `size`, size capped by `app.pagination.max-page-size`).
 - Identifiers are random UUIDs generated by the service.
-- A user's status is stored and returned, but nothing changes it and nothing checks it yet: there is no endpoint to block or deactivate a user, and creating a transaction does not look at the status of its user.
+- Only an `ACTIVE` user can create a transaction, but nothing changes a user's status yet: there is no endpoint to block or deactivate a user. The status is checked only when a transaction is created, so blocking a user does not stop the transactions that are already `PENDING`.
 - `POST /users` has no authentication, so anyone can register. It answers 409 for an email that is already registered, which tells a caller that the email exists.
-- Transactions do not carry a user yet: `user_id` is `NOT NULL` in the database, so `POST /transactions` fails until the request and the entity send it.
+- The user is checked and then the transaction is saved, in two steps. A user cannot be deleted through the API today, so nothing can remove the user in between, and the foreign key is the last line of defence.
+- A transaction cannot change owner: the owner is set at creation and `PUT` keeps it.

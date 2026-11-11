@@ -5,13 +5,15 @@ import com.event.producer.domain.user.UserRepository;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
  * Test double that implements the domain port with a map. Because services depend on the
  * {@link UserRepository} interface, they can be tested without a database.
+ * Public so the tests of other services that need a user store can use it too.
  */
-class InMemoryUserRepository implements UserRepository {
+public class InMemoryUserRepository implements UserRepository {
 
     final Map<UUID, User> store = new LinkedHashMap<>();
 
@@ -19,6 +21,11 @@ class InMemoryUserRepository implements UserRepository {
     public User save(User user) {
         store.put(user.id(), user);
         return user;
+    }
+
+    @Override
+    public Optional<User> findById(UUID id) {
+        return Optional.ofNullable(store.get(id));
     }
 
     @Override

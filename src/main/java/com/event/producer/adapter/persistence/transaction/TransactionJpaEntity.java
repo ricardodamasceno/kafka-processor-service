@@ -31,6 +31,10 @@ public class TransactionJpaEntity {
     @Id
     private UUID id;
 
+    /** The owner. A plain id, not an association: users and transactions are separate contexts. */
+    @Column(name = "user_id", nullable = false)
+    private UUID userId;
+
     @Column(name = "account_id", nullable = false)
     private String accountId;
 

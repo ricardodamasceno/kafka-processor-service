@@ -15,9 +15,10 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 class TransactionEventTest {
 
     private static final UUID ID = UUID.fromString("3f2b8f36-0000-4000-8000-000000000001");
+    private static final UUID USER_ID = UUID.fromString("a1111111-0000-4000-8000-000000000001");
 
     private static Transaction transaction(TransactionStatus status) {
-        return new Transaction(ID, "acc-1", TransactionType.DEPOSIT, new BigDecimal("10.00"),
+        return new Transaction(ID, USER_ID, "acc-1", TransactionType.DEPOSIT, new BigDecimal("10.00"),
                 Instant.parse("2026-11-10T12:00:00Z"), status);
     }
 

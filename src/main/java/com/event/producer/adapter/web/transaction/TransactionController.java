@@ -32,11 +32,11 @@ class TransactionController {
 
     /**
      * The transaction is saved as {@code PENDING} and processed later, asynchronously. So the answer is
-     * 202 (accepted), not 201 (created), with an empty body.
+     * 202 (accepted), not 201 (created), with an empty body. The user has to exist (404) and be active (409).
      */
     @PostMapping
     ResponseEntity<Void> create(@Valid @RequestBody TransactionRequest request) {
-        service.create(request.accountId(), request.type(), request.amount(), request.occurredAt());
+        service.create(request.userId(), request.accountId(), request.type(), request.amount(), request.occurredAt());
         return ResponseEntity.accepted().build();
     }
 
@@ -53,7 +53,7 @@ class TransactionController {
     }
 
     @PutMapping("/{id}")
-    TransactionResponse update(@PathVariable UUID id, @Valid @RequestBody TransactionRequest request) {
+    TransactionResponse update(@PathVariable UUID id, @Valid @RequestBody TransactionUpdateRequest request) {
         return TransactionResponse.from(service.update(
                 id, request.accountId(), request.type(), request.amount(), request.occurredAt()));
     }

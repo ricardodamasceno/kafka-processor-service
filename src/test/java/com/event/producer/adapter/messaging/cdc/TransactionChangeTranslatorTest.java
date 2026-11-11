@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TransactionChangeTranslatorTest {
 
     private static final UUID ID = UUID.fromString("3f2b8f36-0000-4000-8000-000000000001");
+    private static final UUID USER_ID = UUID.fromString("a1111111-0000-4000-8000-000000000001");
 
     private final TransactionChangeTranslator translator = new TransactionChangeTranslator();
 
@@ -30,7 +31,7 @@ class TransactionChangeTranslatorTest {
     }
 
     private static Row row(TransactionStatus status, BigDecimal amount) {
-        return new Row(ID, "acc-1", TransactionType.DEPOSIT, amount, Instant.parse("2026-11-10T12:00:00Z"), status);
+        return new Row(ID, USER_ID, "acc-1", TransactionType.DEPOSIT, amount, Instant.parse("2026-11-10T12:00:00Z"), status);
     }
 
     private static TransactionChangeMessage change(String op, Row before, Row after) {
@@ -44,6 +45,7 @@ class TransactionChangeTranslatorTest {
         TransactionEvent created = event.orElseThrow();
         assertEquals(TransactionEventType.TRANSACTION_CREATED, created.type());
         assertEquals(ID, created.transaction().id());
+        assertEquals(USER_ID, created.transaction().userId());
         assertEquals("acc-1", created.transaction().accountId());
         assertEquals(new BigDecimal("10.50"), created.transaction().amount());
         assertEquals(TransactionStatus.PENDING, created.transaction().status());
@@ -67,6 +69,7 @@ class TransactionChangeTranslatorTest {
 
         assertEquals(expected, event.type());
         assertEquals(to, event.transaction().status());
+        assertEquals(USER_ID, event.transaction().userId());
         assertEquals(ID + ":" + to, event.id());
     }
 
@@ -102,10 +105,19 @@ class TransactionChangeTranslatorTest {
 
     @Test
     void anIncompleteRowIsRejected() {
-        Row incomplete = new Row(ID, null, TransactionType.DEPOSIT, new BigDecimal("1.00"),
+        Row incomplete = new Row(ID, USER_ID, null, TransactionType.DEPOSIT, new BigDecimal("1.00"),
                 Instant.parse("2026-11-10T12:00:00Z"), TransactionStatus.PENDING);
 
         assertThrows(InvalidMessageException.class, () -> translator.translate(change("c", null, incomplete)));
+    }
+
+    @Test
+    void aRowWithoutTheUserIsRejected() {
+        // Changes published before the user_id column existed do not have it
+        Row withoutUser = new Row(ID, null, "acc-1", TransactionType.DEPOSIT, new BigDecimal("1.00"),
+                Instant.parse("2026-11-10T12:00:00Z"), TransactionStatus.PENDING);
+
+        assertThrows(InvalidMessageException.class, () -> translator.translate(change("c", null, withoutUser)));
     }
 
     @Test

@@ -9,11 +9,11 @@ import java.time.Instant;
 import java.util.UUID;
 
 /** JSON body returned by the API for a transaction. */
-public record TransactionResponse(UUID id, String accountId, TransactionType type, BigDecimal amount,
+public record TransactionResponse(UUID id, UUID userId, String accountId, TransactionType type, BigDecimal amount,
                                   Instant occurredAt, TransactionStatus status) {
 
     static TransactionResponse from(Transaction transaction) {
-        return new TransactionResponse(transaction.id(), transaction.accountId(), transaction.type(),
-                transaction.amount(), transaction.occurredAt(), transaction.status());
+        return new TransactionResponse(transaction.id(), transaction.userId(), transaction.accountId(),
+                transaction.type(), transaction.amount(), transaction.occurredAt(), transaction.status());
     }
 }

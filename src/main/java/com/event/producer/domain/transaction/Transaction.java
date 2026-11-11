@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * A financial transaction on an account.
+ * A financial transaction on an account, made by a user.
  * <p>
  * Domain entity: an immutable record. Money uses {@link BigDecimal} (never double), and the
  * amount is always positive: the direction of the movement comes from {@link TransactionType}.
@@ -17,6 +17,7 @@ import java.util.UUID;
  */
 public record Transaction(
         @NonNull UUID id,
+        @NonNull UUID userId,
         @NonNull String accountId,
         @NonNull TransactionType type,
         @NonNull BigDecimal amount,

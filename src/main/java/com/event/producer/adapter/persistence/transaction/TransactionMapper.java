@@ -13,12 +13,12 @@ import lombok.NoArgsConstructor;
 final class TransactionMapper {
 
     static TransactionJpaEntity toEntity(Transaction transaction) {
-        return new TransactionJpaEntity(transaction.id(), transaction.accountId(), transaction.type(),
-                transaction.amount(), transaction.occurredAt(), transaction.status());
+        return new TransactionJpaEntity(transaction.id(), transaction.userId(), transaction.accountId(),
+                transaction.type(), transaction.amount(), transaction.occurredAt(), transaction.status());
     }
 
     static Transaction toDomain(TransactionJpaEntity entity) {
-        return new Transaction(entity.getId(), entity.getAccountId(), entity.getType(),
+        return new Transaction(entity.getId(), entity.getUserId(), entity.getAccountId(), entity.getType(),
                 entity.getAmount(), entity.getOccurredAt(), entity.getStatus());
     }
 }

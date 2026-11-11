@@ -15,12 +15,14 @@ class TransactionMapperTest {
 
     @Test
     void convertsDomainToEntityAndBack() {
-        Transaction transaction = new Transaction(UUID.randomUUID(), "acc-1", TransactionType.WITHDRAWAL,
-                new BigDecimal("42.50"), Instant.parse("2026-11-07T10:00:00Z"), TransactionStatus.COMPLETED);
+        Transaction transaction = new Transaction(UUID.randomUUID(), UUID.randomUUID(), "acc-1",
+                TransactionType.WITHDRAWAL, new BigDecimal("42.50"), Instant.parse("2026-11-07T10:00:00Z"),
+                TransactionStatus.COMPLETED);
 
         TransactionJpaEntity entity = TransactionMapper.toEntity(transaction);
 
         assertEquals(transaction.id(), entity.getId());
+        assertEquals(transaction.userId(), entity.getUserId());
         assertEquals(transaction.accountId(), entity.getAccountId());
         assertEquals(transaction.type(), entity.getType());
         assertEquals(transaction.amount(), entity.getAmount());

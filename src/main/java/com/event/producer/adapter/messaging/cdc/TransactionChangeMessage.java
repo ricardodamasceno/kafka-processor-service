@@ -27,6 +27,7 @@ public record TransactionChangeMessage(String op, Row before, Row after) {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Row(
             UUID id,
+            @JsonProperty("user_id") UUID userId,
             @JsonProperty("account_id") String accountId,
             TransactionType type,
             BigDecimal amount,
