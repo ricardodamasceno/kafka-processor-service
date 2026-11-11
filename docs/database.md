@@ -94,6 +94,9 @@ docker exec postgres psql -U events -d postgres -c "DROP DATABASE events_process
 | Version | File | Creates |
 |---|---|---|
 | V1 | `V1__add_transaction.sql` | Table `transactions` (id, account_id, type, amount, occurred_at, status), checks on `type`, `amount > 0` and `status` (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, no default), an index on `(account_id, occurred_at)`, and `REPLICA IDENTITY FULL` so the change events published by Debezium carry the complete old row. See [debezium.md](debezium.md) |
+| V2 | `V2__add_user.sql` | Table `users` (id, name, email, created_at). The email is unique regardless of case, through a unique index on `lower(email)`, so the application should store it normalized |
+| V3 | `V3__add_user_id_to_transaction.sql` | Adds `user_id` to `transactions`, a foreign key to `users`, and an index on `(user_id, occurred_at)`. The column is `NOT NULL` with no default, so the migration only runs while `transactions` is empty and every insert has to state the user. A user that has transactions cannot be deleted |
+| V4 | `V4__add_user_status.sql` | Adds `status` to `users` (`ACTIVE`, `INACTIVE`, `BLOCKED`). Users that already existed become `ACTIVE`, and the default is dropped afterwards so every insert states its status |
 
 The history was rewritten on 2026-11-10: the local database was recreated, so the migrations of the removed `clicks` table were dropped and the others were merged into a single `V1`. That is only possible because nothing outside the local environment had applied them. Once a migration has run anywhere else, it must not be edited or renumbered, and a change goes into a new migration.
 

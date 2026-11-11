@@ -32,6 +32,9 @@ What lives here: the entities and the rules that are always true, plus the **por
 | `domain.transaction.TransactionType` | Enum: `DEPOSIT`, `WITHDRAWAL` |
 | `domain.transaction.TransactionStatus` | Enum: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`. Where a transaction is in its life |
 | `domain.transaction.TransactionRepository` | Port: the contract for storing transactions. Defined here, implemented elsewhere |
+| `domain.user.User` | Entity: an immutable record. The name is trimmed and the email is trimmed and lower-cased, so two emails that differ only in case are the same user. Limits: name up to 200 characters, email up to 320 and in a valid format |
+| `domain.user.UserRepository` | Port: the contract for storing users and checking whether an email is taken |
+| `domain.user.UserStatus` | Enum: `ACTIVE`, `INACTIVE`, `BLOCKED`. Where a user is in their life. A new user is `ACTIVE` |
 | `domain.shared.DomainValidationException` | Thrown when a domain rule is violated |
 
 Why: if a rule such as "an amount must be positive" lives in the entity, it is enforced no matter who creates a `Transaction` (an HTTP call, a Kafka consumer, a test).
@@ -46,7 +49,9 @@ What lives here: the operations the system supports. Each service orchestrates d
 | `application.transaction.TransactionEvent` | Something that happened to a transaction: a type, the complete state of the transaction, and an id that stays the same if the event is produced twice |
 | `application.transaction.TransactionEventType` | `TRANSACTION_CREATED`, `TRANSACTION_PROCESSING`, `TRANSACTION_COMPLETED`, `TRANSACTION_FAILED` |
 | `application.transaction.TransactionEventPublisher` | Outbound port: how the application announces a transaction event. Implemented by the Kafka adapter |
+| `application.user.UserService` | `register`: validates, assigns an id and the registration time (from the `Clock`), refuses an email that is already registered, and saves the user as `ACTIVE` |
 | `application.shared.NotFoundException` | Thrown when a resource does not exist |
+| `application.shared.ConflictException` | Thrown when a request conflicts with what already exists, such as a registered email |
 | `application.shared.PublishFailedException` | Thrown when an event could not be published |
 
 `create` validates, assigns an id and saves the transaction as `PENDING`. What happens next is driven by the changes of the `transactions` table, which Debezium publishes to Kafka and a translator turns into transaction events: the request never calls Kafka. See [ADR 0005](adr/0005-pending-transactions-and-cdc-events.md), [ADR 0006](adr/0006-translate-changes-into-transaction-events.md) and [debezium.md](debezium.md).
@@ -66,7 +71,10 @@ Adapters convert data between the format the inner layers use and the format an 
 | `TransactionController` | Receives HTTP, calls a service, returns HTTP. No business rule |
 | `TransactionRequest` | Input DTO (data transfer object) with Bean Validation (`@NotBlank`, `@Positive`...) |
 | `TransactionResponse` | Output DTO |
-| `ApiExceptionHandler` | Maps `NotFoundException` to 404 and `DomainValidationException` to 400 |
+| `UserController` | `POST /users`: registers a user |
+| `UserRequest` | Input DTO. It only checks that the fields are present; format and lengths are rules of the domain `User` |
+| `UserResponse` | Output DTO |
+| `ApiExceptionHandler` | Maps `NotFoundException` to 404, `ConflictException` to 409 and `DomainValidationException` to 400 |
 
 DTOs are separate from domain entities so the API contract and the domain model can change independently.
 
@@ -77,6 +85,8 @@ DTOs are separate from domain entities so the API contract and the domain model 
 | `TransactionJpaEntity` | JPA class that maps to the table. It is **not** the domain entity |
 | `TransactionJpaRepository` | Spring Data interface (Spring generates the SQL access) |
 | `TransactionRepositoryAdapter` | Implements the domain port and delegates to Spring Data; it does the persistence only |
+| `UserJpaEntity`, `UserJpaRepository`, `UserMapper` | The same three pieces for the `users` table. The repository checks the email with `lower()`, which is what the unique index covers |
+| `UserRepositoryAdapter` | Implements `UserRepository`. When the unique index on the email rejects an insert, it throws `ConflictException` |
 | `TransactionMapper` | Converts between domain entity and JPA entity (`toEntity` / `toDomain`). Its only responsibility is this translation. It is a stateless utility class with static methods, not a Spring bean |
 
 Why two entity classes: JPA needs a no-arg constructor, annotations and a mutable shape. Keeping that out of the domain keeps the domain pure. The cost is the mapping step, which lives in the mapper classes so it can be tested on its own.
@@ -103,7 +113,7 @@ Consumer group: `transaction-event-translator`. All instances of the application
 
 ### `config`: frameworks and wiring
 
-`ServiceConfig` is the **composition root**: it creates each service and injects the ports (the repository). Spring picks the adapter that implements each port. This is the only place that knows both sides, and it keeps the application layer free of Spring.
+`ServiceConfig` is the **composition root**: it creates each service and injects the ports (the repository, and the `Clock` when a service needs the current time). Spring picks the adapter that implements each port. This is the only place that knows both sides, and it keeps the application layer free of Spring.
 
 ## How a request flows
 
@@ -120,6 +130,19 @@ Consumer group: `transaction-event-translator`. All instances of the application
 When the status changes later (`PROCESSING`, `COMPLETED` or `FAILED`), the same path publishes the matching event to `payments-transactions-update`. A change that does not alter the status, such as a `PUT` that only changes the amount, and a delete produce no event.
 
 `GET`, `PUT` and `DELETE` go straight to the database. Every change to the table, including these, is published to `transactions-cdc-events`. `PUT` keeps the current status, because the request does not carry it.
+
+`POST /users`:
+
+1. `UserController` receives the JSON as a `UserRequest` and checks that `name` and `email` are present.
+2. It calls `UserService.register(name, email)`.
+3. The service creates a `User` (the domain trims and normalizes the data and checks its rules; a broken rule is a 400 with the reason) with a new id, the time from the `Clock` and the status `ACTIVE`. The status is not part of the request: a client cannot choose it, and a `status` field in the body is ignored.
+4. If the email is already registered, regardless of case, the service throws `ConflictException`, which is a **409**.
+5. `UserRepositoryAdapter` converts the `User` to a `UserJpaEntity` and saves it. If two requests with the same email pass step 4 at the same time, the unique index rejects the second one and the adapter reports it as the same `ConflictException`.
+6. The API answers **201 Created** with the user (`id`, `name`, `email`, `createdAt`, `status`). Unlike creating a transaction, the body carries the id, because registration is synchronous and the client needs the id to create transactions. There is no `Location` header.
+
+```bash
+curl -i -X POST http://localhost:8080/users -H "Content-Type: application/json" -d '{"name":"Alice Silva","email":"alice@example.com"}'
+```
 
 ## Lombok
 
@@ -158,6 +181,7 @@ The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.ma
 - **Domain tests** (`TransactionTest`): pure Java, no Spring, no database.
 - **Mapper tests** (`TransactionMapperTest`): check that the conversion in both directions loses nothing.
 - **Service tests** (`TransactionServiceTest`): use `InMemoryTransactionRepository`, a test double that implements the port. This works because services depend on the interface, not on JPA. They cover: a created transaction is `PENDING`, invalid data stores nothing, `update` keeps the status, `delete`, and paging.
+- **User tests** (`UserTest`, `UserServiceTest`, `UserMapperTest`): normalization, the name and email rules, a duplicated email regardless of case, nothing stored when the data is invalid, the registration time coming from a fixed `Clock`, and a new user being `ACTIVE`.
 - **Event tests** (`TransactionEventTest`): the event type follows the status, and the event id is the same for the same transaction and status.
 - **Translator tests** (`TransactionChangeTranslatorTest`): every rule of the translation table, plus the rejections: an update without the old row, a change without an operation, an incomplete row, and a row that breaks a domain rule.
 - **Message contract tests** (`JsonMessageCodecTest`, `TransactionEventMessageTest`): read an insert, an update and a delete in the shape Debezium publishes (including envelope fields the service ignores), reject malformed payloads and unknown enum values, and check the JSON of a transaction event.
@@ -175,3 +199,6 @@ The Kafka and DLQ settings live under `app.messaging` (`send-timeout`, `retry.ma
 - Delivery is at-least-once, so the same event can be published twice. Its id is the same each time, so a consumer can ignore a duplicate. Order is kept inside each event topic but not between the two. A message in a DLQ needs a human or a job to look at it: there is no automatic reprocessing yet.
 - Paging is offset-based (`page` and `size`, size capped by `app.pagination.max-page-size`).
 - Identifiers are random UUIDs generated by the service.
+- A user's status is stored and returned, but nothing changes it and nothing checks it yet: there is no endpoint to block or deactivate a user, and creating a transaction does not look at the status of its user.
+- `POST /users` has no authentication, so anyone can register. It answers 409 for an email that is already registered, which tells a caller that the email exists.
+- Transactions do not carry a user yet: `user_id` is `NOT NULL` in the database, so `POST /transactions` fails until the request and the entity send it.

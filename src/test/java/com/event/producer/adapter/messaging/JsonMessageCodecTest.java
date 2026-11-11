@@ -74,6 +74,17 @@ class JsonMessageCodecTest {
     }
 
     @Test
+    void ignoresColumnsTheServiceDoesNotRead() {
+        // A column added to the table (here user_id) shows up in the messages before the code reads it
+        String after = row("10.50", "PENDING").replace("}", ",\"user_id\":\"a1111111-0000-4000-8000-000000000001\"}");
+
+        TransactionChangeMessage change = codec.fromJson(envelope("c", "null", after), TransactionChangeMessage.class);
+
+        assertEquals(ID, change.after().id());
+        assertEquals(TransactionStatus.PENDING, change.after().status());
+    }
+
+    @Test
     void malformedJsonIsReportedAsInvalidMessage() {
         assertThrows(InvalidMessageException.class, () -> codec.fromJson("not json", TransactionChangeMessage.class));
     }

@@ -1,9 +1,13 @@
 package com.event.producer.config;
 
 import com.event.producer.application.transaction.TransactionService;
+import com.event.producer.application.user.UserService;
 import com.event.producer.domain.transaction.TransactionRepository;
+import com.event.producer.domain.user.UserRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.time.Clock;
 
 /**
  * Composition root: the only place that knows both the application services and their dependencies.
@@ -15,8 +19,19 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 class ServiceConfig {
 
+    /** The source of the current time. Services ask the clock instead of calling {@code Instant.now()}, so tests can fix it. */
+    @Bean
+    Clock clock() {
+        return Clock.systemUTC();
+    }
+
     @Bean
     TransactionService transactionService(TransactionRepository repository) {
         return new TransactionService(repository);
+    }
+
+    @Bean
+    UserService userService(UserRepository repository, Clock clock) {
+        return new UserService(repository, clock);
     }
 }
