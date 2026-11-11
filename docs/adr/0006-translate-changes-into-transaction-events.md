@@ -44,5 +44,5 @@ Alternatives considered:
 - Delivery is at-least-once: the same event can be published twice. Kafka transactions are not used, because duplicates are harmless when consumers use the event id.
 - Order is kept inside each topic but not between the two. A consumer that reads both can see an update before the creation, which is why each event carries the complete state.
 - Changes that do not alter the status (a `PUT`) and deletes produce no event, so consumers never see them. Whether they should is still to be decided.
-- Only the validation step reads the creation topic ([ADR 0008](0008-validate-transactions-in-a-consumer-of-created-events.md)). Nothing reads the update topic yet, and nothing carries out a `PROCESSING` transaction. The executor and the notifier are the next steps.
+- Only the validation step reads the creation topic ([ADR 0008](0008-validate-transactions-in-a-consumer-of-created-events.md)). The update topic is read by the movement recorder ([ADR 0009](0009-record-movements-in-a-consumer-of-the-update-events.md)), which carries out a `PROCESSING` transaction, and by the notification context ([ADR 0010](0010-notification-context-reads-the-transaction-outcomes.md)).
 - The event format is now a public contract. It should get a versioned schema (Schema Registry) before more consumers depend on it.

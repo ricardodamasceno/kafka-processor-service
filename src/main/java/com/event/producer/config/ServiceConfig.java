@@ -1,6 +1,8 @@
 package com.event.producer.config;
 
 import com.event.producer.application.movement.MovementService;
+import com.event.producer.application.notification.NotificationService;
+import com.event.producer.application.notification.Notifier;
 import com.event.producer.application.transaction.TransactionService;
 import com.event.producer.application.user.UserService;
 import com.event.producer.application.user.UserStatusCache;
@@ -37,6 +39,11 @@ class ServiceConfig {
     @Bean
     MovementService movementService(MovementRepository repository, Clock clock) {
         return new MovementService(repository, clock);
+    }
+
+    @Bean
+    NotificationService notificationService(Notifier notifier) {
+        return new NotificationService(notifier);
     }
 
     @Bean
